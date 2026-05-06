@@ -352,7 +352,8 @@ async function getAssistantPayload({ messages, userName, flowStage, initialQuery
 
 /**
  * Anthropomorphic flow system prompt
- * Follows: Name -> Goal -> Specifics -> LinkedIn -> AI History -> Search
+ * Follows strict sequence: Name -> Goal -> Specifics -> LinkedIn (mandatory) -> AI History (mandatory) -> Search
+ * LinkedIn and AI History are both required steps - users cannot skip AI History
  */
 function buildSystemPrompt(userName, flowStage) {
   const name = userName || 'there'
@@ -362,19 +363,25 @@ Return JSON only:
 {"kind":"text","text":"Message"}
 {"kind":"upload_request","text":"Message","infoTitle":"Title","infoBody":"Body"}
 
-STRICT FLOW:
-1. NAME: Ask for their name if unknown.
+STRICT SEQUENCE (mandatory):
+1. NAME: Ask for the user's name if unknown. Use it to personalize.
 2. GOAL: Ask "Who do you want to find, ${name}, and what would make this connection useful?"
-3. SPECIFICS: Ask ONE clarifying question about the person they need (role, industry, or background).
-4. LINKEDIN: Ask for their LinkedIn profile URL or if they'd prefer to skip it.
-5. AI HISTORY: Offer to use an AI history export (ChatGPT/Claude) for deeper context. This is the "Prompt & Paste" stage.
-6. SEARCH: Search happens automatically after the AI History stage.
+3. SPECIFICS: Ask ONE clarifying question about the ideal person (role, industry, background, location, or key constraint).
+4. LINKEDIN: Ask for their LinkedIn profile URL. Accept "no LinkedIn" as valid input, but do not skip this step.
+5. AI HISTORY (REQUIRED): After LinkedIn, present the upload_request with instructions to copy the Master Prompt and paste a structured summary from ChatGPT/Claude. This step is MANDATORY - do not offer to skip it.
+6. SEARCH: Automatically triggered after AI History is processed.
+
+IMPORTANT RULES:
+- LinkedIn is required but can be "no LinkedIn"
+- AI History is REQUIRED - do not say "continue without" or offer to skip
+- Do not move to search until the AI History step is handled
+- Address the user as ${name}
 
 STYLE:
-- Neutral, professional, and concise.
-- Use iMessage-style conversational warmth but stay minimalist.
-- One question at a time.
-- Address the user as ${name}.`
+- Neutral, professional, and concise
+- iMessage-style conversational warmth but minimalist
+- One question at a time
+- Explain why each step matters briefly`
 }
 
 /**
@@ -395,7 +402,7 @@ function buildConversationForDeepSeek(messages, flowStage, initialQuery) {
   } else if (flowStage === 'linkedin') {
     systemContext.push({ role: 'system', content: 'STAGE: LinkedIn - Ask if they have a LinkedIn profile. Accept "no LinkedIn" as a valid answer.' })
   } else if (flowStage === 'ai_history') {
-    systemContext.push({ role: 'system', content: 'STAGE: AI History - Offer upload of ChatGPT/Claude export. Tell them to say "continue without" if they prefer.' })
+    systemContext.push({ role: 'system', content: 'STAGE: AI History (MANDATORY) - User has completed LinkedIn. Now present upload_request for AI History export. Do NOT mention "continue without" - this step is required.' })
   }
 
   const conversation = messages.slice(-12).map(m => ({
@@ -418,12 +425,13 @@ function buildConversationForDeepSeek(messages, flowStage, initialQuery) {
 
 /**
  * Deterministic fallback - follows the same flow structure
+ * LinkedIn and AI History are both required steps
  */
 function buildDeterministicChatResponse(messages, userName, flowStage) {
   const userMessages = messages.filter((message) => message.role === 'user')
   const combined = messages.map((message) => message.content).join(' ').toLowerCase()
   const hasLinkedin = /linkedin\.com\/in\/|linkedin\.com\/pub\/|no linkedin|don't have|do not have|don't have a linkedin|do not have a linkedin/i.test(combined)
-  const hasContext = /(upload|export|attached|chatgpt|claude|ai history|skip|continue without)/i.test(combined)
+  const hasContext = /(upload|export|attached|chatgpt|claude|ai history)/i.test(combined)
 
   if (flowStage === 'ai_history' || hasLinkedin) {
     if (hasContext) {
@@ -431,16 +439,16 @@ function buildDeterministicChatResponse(messages, userName, flowStage) {
     }
     return {
       kind: 'upload_request',
-      text: 'To get the best matching results, use the "Copy summary prompt" button below, paste it into ChatGPT/Claude, and paste the result here. Alternatively, upload your AI history export.',
-      infoTitle: 'Add context for better matching',
-      infoBody: 'Use the prompt to get a high-signal summary of your background and goals for our matching engine.',
+      text: 'To get the best matching results, use the "Copy Master Prompt" button below, paste it into ChatGPT or Claude, and paste the structured summary result here. You can also drop a JSON, TXT, or HTML export file from ChatGPT or Claude.',
+      infoTitle: 'Add context (required)',
+      infoBody: 'This step is required for matching. Use the Master Prompt to generate a high-signal professional summary for our matching engine.',
     }
   }
 
   if (flowStage === 'linkedin') {
     return {
       kind: 'text',
-      text: `Got it. Do you have a LinkedIn profile I should use as additional context? You can paste it here, or say "no LinkedIn" to skip.`,
+      text: `Got it. Do you have a LinkedIn profile? If yes, paste the URL. If not, just say so.`,
     }
   }
 
