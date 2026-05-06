@@ -120,6 +120,7 @@ function App() {
   const [importFile, setImportFile] = useState<File | null>(null)
   const [isDragover, setIsDragover] = useState(false)
   const [importStatus, setImportStatus] = useState('')
+  const [pastedHistory, setPastedHistory] = useState('')
   const [generatedProfile, setGeneratedProfile] = useState<unknown>(null)
   const [linkedinUrl, setLinkedinUrl] = useState('')
   const [selectedCandidateId, setSelectedCandidateId] = useState('')
@@ -209,11 +210,13 @@ function App() {
 
   function detectFlowStage(msgs: ChatMessage[]) {
     const combined = msgs.map(m => m.content).join(' ').toLowerCase()
-    if (/linkedin\.com|linkedin profile/i.test(combined)) {
-      setFlowStage('linkedin')
-    }
-    if (/upload|export|attached|chatgpt|claude/i.test(combined)) {
+    const hasLinkedin = /linkedin\.com|linkedin profile/i.test(combined)
+    const hasAiHistory = /upload|export|attached|chatgpt|claude|master prompt|context.*export/i.test(combined)
+    
+    if (hasAiHistory) {
       setFlowStage('ai_history')
+    } else if (hasLinkedin) {
+      setFlowStage('linkedin')
     }
   }
 
@@ -262,12 +265,23 @@ function App() {
       setChatSessionId('')
       setFlowStage('name')
       setChatInput('')
+      setSelectedCandidateId('')
+      setLinkedinUrl('')
+      setGeneratedProfile(null)
+      setImportFile(null)
+      setPastedHistory('')
+      setImportStatus('')
+      setError(null)
       try {
         await fetch('/api/chat/all', { method: 'DELETE', headers: authHeaders() })
-        setMessages([{ id: crypto.randomUUID(), role: 'assistant', content: 'History cleared. What should I call you?' }])
       } catch {
-        setError('Could not clear history on server.')
+        // Continue with local reset even if server fails
       }
+      localStorage.clear()
+      setAccessToken('')
+      setEmail('')
+      setDisplayName('')
+      setScreen('landing')
       return
     }
 
@@ -382,33 +396,37 @@ function App() {
     }
   }
 
-  async function uploadHistory() {
-    if (!importFile) {
-      setImportStatus('Choose a file first.')
+  async function uploadHistory(textToProcess?: string) {
+    const fileContent = importFile ? (await importFile.text()).slice(0, 8000) : ''
+    const pastedContent = textToProcess || pastedHistory
+    const contentToProcess = pastedContent || fileContent
+    
+    if (!contentToProcess.trim()) {
+      setImportStatus('Paste your AI summary or drop a file first.')
       return
     }
-    setImportStatus('Reading export...')
-    const snippet = (await importFile.text()).slice(0, 8000)
+    
+    setImportStatus('Building your profile...')
     try {
       const response = await fetch('/api/profile-import', {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
-          source: 'AI history export',
-          fileName: importFile.name,
-          contentSnippet: snippet,
+          source: importFile ? 'AI history export' : 'Pasted AI summary',
+          fileName: importFile?.name || 'pasted summary',
+          contentSnippet: contentToProcess.slice(0, 8000),
           initialQuery: heroQuery,
           messages: messages.map(({ role, content }) => ({ role, content })),
         }),
       })
       const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.message || 'Could not import that file.')
+      if (!response.ok) throw new Error(data.message || 'Could not process that.')
       setGeneratedProfile(data.generatedProfile)
       setImportStatus('Profile built. Starting search...')
       setFlowStage('search')
       await startConnection(data.generatedProfile)
     } catch (caught) {
-      setImportStatus(caught instanceof Error ? caught.message : 'Could not import that file.')
+      setImportStatus(caught instanceof Error ? caught.message : 'Could not process that.')
     }
   }
 
@@ -526,6 +544,18 @@ function App() {
                 Start
               </button>
             </div>
+            <div className="landing-auth-row">
+              <button
+                type="button"
+                className="landing-signin"
+                onClick={() => {
+                  setScreen('auth')
+                  setAuthMode('signin')
+                }}
+              >
+                Sign in
+              </button>
+            </div>
           </form>
         </section>
       </main>
@@ -610,6 +640,8 @@ function App() {
                 importStatus={importStatus}
                 selectedCandidateId={selectedCandidateId}
                 onChooseCandidate={chooseCandidate}
+                pastedHistory={pastedHistory}
+                setPastedHistory={setPastedHistory}
               />
             ))}
             {isSending && (
@@ -662,16 +694,20 @@ function Message({
   importStatus,
   selectedCandidateId,
   onChooseCandidate,
+  pastedHistory,
+  setPastedHistory,
 }: {
   message: ChatMessage
   importFile: File | null
   setImportFile: (file: File | null) => void
   isDragover: boolean
   setIsDragover: (value: boolean) => void
-  uploadHistory: () => Promise<void>
+  uploadHistory: (text?: string) => Promise<void>
   importStatus: string
   selectedCandidateId: string
   onChooseCandidate: (requestId: string, candidate: Candidate) => Promise<void>
+  pastedHistory: string
+  setPastedHistory: (text: string) => void
 }) {
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -697,49 +733,37 @@ function Message({
         <p>{message.content}</p>
         {message.payload?.kind === 'upload_request' && (
           <div className="upload-card">
-            <h3 className="upload-title">Add context (required)</h3>
+            <h3 className="upload-title">Add context <span className="required-badge">Required</span></h3>
             <p className="upload-description">
-              This step is required for matching. The best results come from using the Master Prompt to generate a structured summary in ChatGPT or Claude, then pasting the result here.
+              This step is required for matching. Use the Master Prompt below to generate a structured summary in ChatGPT or Claude, then paste the result here.
             </p>
             <div className="upload-options">
               <button
                 type="button"
                 className="upload-btn primary"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(MASTER_PROMPT)
-                    // Show feedback
-                    const btn = document.activeElement as HTMLButtonElement
-                    if (btn) {
-                      const original = btn.textContent
-                      btn.textContent = 'Copied!'
-                      btn.classList.add('copied')
-                      setTimeout(() => {
-                        btn.textContent = original
-                        btn.classList.remove('copied')
-                      }, 2000)
-                    }
-                  } catch {
-                    // Fallback for environments where clipboard API isn't available
-                    const textarea = document.createElement('textarea')
-                    textarea.value = MASTER_PROMPT
-                    textarea.style.position = 'fixed'
-                    textarea.style.opacity = '0'
-                    document.body.appendChild(textarea)
-                    textarea.select()
-                    document.execCommand('copy')
-                    document.body.removeChild(textarea)
-                    const btn = document.activeElement as HTMLButtonElement
-                    if (btn) {
-                      const original = btn.textContent
-                      btn.textContent = 'Copied!'
-                      setTimeout(() => { btn.textContent = original }, 2000)
-                    }
-                  }
+                id="copy-master-prompt"
+                onClick={() => {
+                  copyToClipboard(MASTER_PROMPT, 'copy-master-prompt')
                 }}
               >
                 Copy Master Prompt
               </button>
+            </div>
+            <div className="paste-section">
+              <label className="paste-label" htmlFor="ai-history-paste">
+                Paste your AI-generated summary
+              </label>
+              <textarea
+                id="ai-history-paste"
+                className="paste-textarea"
+                value={pastedHistory}
+                onChange={(e) => setPastedHistory(e.target.value)}
+                placeholder="Paste the structured summary from ChatGPT or Claude here..."
+                rows={6}
+              />
+            </div>
+            <div className="upload-divider">
+              <span>or</span>
             </div>
             <div
               className={`file-drop ${isDragover ? 'dragover' : ''}`}
@@ -748,18 +772,22 @@ function Message({
               onDrop={handleDrop}
             >
               <label className="file-drop-label">
-                {importFile ? importFile.name : 'Paste AI summary or drop file'}
+                {importFile ? importFile.name : 'Drop an export file'}
               </label>
-              <span className="file-drop-hint">Paste ChatGPT/Claude output or drop JSON, TXT, HTML, MD export</span>
+              <span className="file-drop-hint">JSON, TXT, HTML, MD export from ChatGPT or Claude</span>
               <input
                 type="file"
                 accept=".json,.txt,.html,.md,.zip"
                 onChange={(e) => setImportFile(e.target.files?.[0] || null)}
               />
             </div>
-            {importFile && (
-              <button type="button" className="upload-btn primary" onClick={() => void uploadHistory()}>
-                Process export
+            {(pastedHistory.trim() || importFile) && (
+              <button 
+                type="button" 
+                className="upload-btn primary process-btn" 
+                onClick={() => void uploadHistory(pastedHistory)}
+              >
+                Process &amp; Search
               </button>
             )}
             {importStatus && <span className="upload-status">{importStatus}</span>}
@@ -870,6 +898,45 @@ function isValidEmail(value: string) {
 
 function looksLikeLinkedin(text: string) {
   return /^https?:\/\/(www\.)?linkedin\.com\/(in|pub)\/[a-z0-9%_-]+\/?/i.test(text.trim())
+}
+
+function copyToClipboard(text: string, buttonId: string) {
+  const btn = document.getElementById(buttonId) as HTMLButtonElement | null
+  const original = btn?.textContent || 'Copied!'
+  
+  const doCopy = async () => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+      }
+      if (btn) {
+        btn.textContent = 'Copied!'
+        btn.classList.add('copied')
+        setTimeout(() => {
+          btn.textContent = original
+          btn.classList.remove('copied')
+        }, 2000)
+      }
+    } catch {
+      if (btn) {
+        btn.textContent = 'Failed to copy'
+        setTimeout(() => {
+          btn.textContent = original
+        }, 2000)
+      }
+    }
+  }
+  
+  void doCopy()
 }
 
 export default App
