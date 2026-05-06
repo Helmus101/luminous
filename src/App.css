@@ -15,10 +15,10 @@
   --soft: #f9fafb;
   
   /* iMessage Bubble Colors */
-  --bubble-user: #1a1a1a;
+  --bubble-user: #000000;
   --bubble-user-text: #ffffff;
-  --bubble-assistant: #f3f4f6;
-  --bubble-assistant-text: #1a1a1a;
+  --bubble-assistant: #f1f1f2;
+  --bubble-assistant-text: #000000;
   
   /* Subtle accent for interactive elements */
   --accent: #4b5563;
@@ -94,7 +94,7 @@ button:disabled {
   align-items: center;
   justify-content: center;
   padding: 48px 24px;
-  background: linear-gradient(to bottom, var(--soft), var(--bg));
+  background: var(--bg);
 }
 
 .landing-content {
@@ -115,15 +115,10 @@ button:disabled {
 }
 
 .landing-logo::before {
-  content: "";
-  width: 20px;
-  height: 12px;
-  background: 
-    radial-gradient(circle at 5px 3px, #fff 1.5px, transparent 0),
-    radial-gradient(circle at 15px 3px, #fff 1.5px, transparent 0),
-    radial-gradient(ellipse at 10px 9px, #fff 3px, transparent 0);
-  background-repeat: no-repeat;
-  background-size: 20px 12px;
+  content: "L";
+  color: #fff;
+  font-weight: 700;
+  font-size: 24px;
 }
 
 .landing-eyebrow {
@@ -445,15 +440,10 @@ button:disabled {
 }
 
 .avatar::before {
-  content: "";
-  width: 14px;
-  height: 9px;
-  background: 
-    radial-gradient(circle at 3px 2px, #fff 1px, transparent 0),
-    radial-gradient(circle at 11px 2px, #fff 1px, transparent 0),
-    radial-gradient(ellipse at 7px 7px, #fff 2px, transparent 0);
-  background-repeat: no-repeat;
-  background-size: 14px 9px;
+  content: "L";
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
 }
 
 .bubble {
@@ -464,19 +454,19 @@ button:disabled {
   word-wrap: break-word;
 }
 
-/* Assistant bubble - iMessage style with tail */
+/* Assistant bubble - iMessage style */
 .message-row.assistant .bubble {
   position: relative;
   color: var(--bubble-assistant-text);
   background: var(--bubble-assistant);
-  border-radius: 18px 18px 18px 4px;
+  border-radius: 20px;
 }
 
-/* User bubble - iMessage dark style with tail */
+/* User bubble - iMessage dark style */
 .message-row.user .bubble {
   color: var(--bubble-user-text);
   background: var(--bubble-user);
-  border-radius: 18px 18px 4px 18px;
+  border-radius: 20px;
 }
 
 .bubble p {

@@ -156,7 +156,7 @@ app.post('/api/profile-import', async (req, res) => {
     return res.status(400).json({ message: 'Upload a readable ChatGPT or Claude export, or paste a summary.' })
   }
 
-  const generatedProfile = extractProfile({
+  const generatedProfile = await extractProfile({
     source,
     contentSnippet,
     messages,
@@ -200,7 +200,7 @@ app.post('/api/connection-request', async (req, res) => {
   const messages = sanitizeMessages(req.body?.messages)
   const linkedinUrl = String(req.body?.linkedinUrl || '').trim().slice(0, 500)
   const linkedinProfile = sanitizeLinkedinProfile(req.body?.linkedinProfile)
-  const generatedProfile = req.body?.generatedProfile || extractProfile({ messages, contentSnippet: '', source: 'chat' })
+  const generatedProfile = req.body?.generatedProfile || (await extractProfile({ messages, contentSnippet: '', source: 'chat' }))
   const people = await getNetworkPeople()
 
   const candidates = await rankCandidatesWithDeepSeek({
@@ -356,29 +356,25 @@ async function getAssistantPayload({ messages, userName, flowStage, initialQuery
  */
 function buildSystemPrompt(userName, flowStage) {
   const name = userName || 'there'
-  return `You are Luminous, a warm and professional private matching agent. You guide users through finding the right mentor or connection through a structured conversation.
+  return `You are Luminous, a minimalist and professional matching agent. You guide users through a structured anthropomorphic flow to find the perfect mentor.
 
-Return JSON only in one of these forms:
+Return JSON only:
 {"kind":"text","text":"Message"}
 {"kind":"upload_request","text":"Message","infoTitle":"Title","infoBody":"Body"}
 
-ANTHROPOMORPHIC FLOW - Follow this sequence strictly:
+STRICT FLOW:
+1. NAME: Ask for their name if unknown.
+2. GOAL: Ask "Who do you want to find, ${name}, and what would make this connection useful?"
+3. SPECIFICS: Ask ONE clarifying question about the person they need (role, industry, or background).
+4. LINKEDIN: Ask for their LinkedIn profile URL or if they'd prefer to skip it.
+5. AI HISTORY: Offer to use an AI history export (ChatGPT/Claude) for deeper context. This is the "Prompt & Paste" stage.
+6. SEARCH: Search happens automatically after the AI History stage.
 
-1. NAME (if not known): Ask for their name warmly. "Before we start, what should I call you?"
-2. GOAL: Once you know their name, ask about the connection they want. "Who do you want to find, ${name}, and what would make this connection useful?"
-3. SPECIFICS: Clarify the person-shape with one focused question. Ask about: role, industry, location, background, or constraint.
-4. LINKEDIN: Ask for their LinkedIn or say "no LinkedIn" if they don't have one. "Do you have a LinkedIn profile I should use as context?"
-5. AI HISTORY: After LinkedIn context (or skipping it), offer AI history export for richer matching. "To get the best results, upload your ChatGPT or Claude export. Otherwise, say 'continue without'."
-6. SEARCH: Once enough context is gathered, the system will run the search automatically.
-
-RULES:
-- Ask only ONE question at a time. Be concise.
-- Address the user as ${name} when speaking naturally.
-- Never reveal candidates in chat.
-- When the user has enough context (LinkedIn + specifics OR just the goal), send upload_request.
-- Speak professionally but warmly. This is a premium matching service.
-- If user says "no LinkedIn" or similar, acknowledge and move to AI history step.
-- If user says "skip" or "continue without", send the upload_request with "continue without" acknowledged.`
+STYLE:
+- Neutral, professional, and concise.
+- Use iMessage-style conversational warmth but stay minimalist.
+- One question at a time.
+- Address the user as ${name}.`
 }
 
 /**
@@ -427,45 +423,34 @@ function buildDeterministicChatResponse(messages, userName, flowStage) {
   const userMessages = messages.filter((message) => message.role === 'user')
   const combined = messages.map((message) => message.content).join(' ').toLowerCase()
   const hasLinkedin = /linkedin\.com\/in\/|linkedin\.com\/pub\/|no linkedin|don't have|do not have|don't have a linkedin|do not have a linkedin/i.test(combined)
-  const hasGoal = userMessages.length >= 1 && /(want|looking for|find|need|search|connect|mentor|career|opportunity|help)/i.test(combined)
-  const hasSpecifics = /(because|so i can|next month|real estate|hospitality|operator|investor|founder|background|city|years?|experience)/i.test(combined)
   const hasContext = /(upload|export|attached|chatgpt|claude|ai history|skip|continue without)/i.test(combined)
 
-  // Flow: AI History
-  if (hasLinkedin || flowStage === 'ai_history') {
+  if (flowStage === 'ai_history' || hasLinkedin) {
     if (hasContext) {
-      return {
-        kind: 'text',
-        text: 'Got it. Starting the search with the context we have.',
-      }
+      return { kind: 'text', text: 'Perfect. I have enough to start the search now.' }
     }
     return {
       kind: 'upload_request',
-      text: 'One more thing: to get the best matching results, upload your ChatGPT or Claude export. It gives me a broader view of your interests and working style. If that feels like too much, just say "continue without" and I\'ll run the search.',
+      text: 'To get the best matching results, use the "Copy summary prompt" button below, paste it into ChatGPT/Claude, and paste the result here. Alternatively, upload your AI history export.',
       infoTitle: 'Add context for better matching',
-      infoBody: 'Best: export ChatGPT from Settings > Data Controls > Export Data. Faster: ask your AI "Summarize my goals and who I should meet" and paste the answer.',
+      infoBody: 'Use the prompt to get a high-signal summary of your background and goals for our matching engine.',
     }
   }
 
-  // Flow: LinkedIn
-  if (hasGoal && !hasLinkedin) {
-    if (userMessages.length >= 3 || hasSpecifics) {
-      return {
-        kind: 'text',
-        text: 'Good context. Do you have a LinkedIn profile I should use as additional signal? You can paste it here, or say "no LinkedIn" if you\'d prefer to skip it.',
-      }
-    }
-  }
-
-  // Flow: Goal
-  if (hasGoal || userMessages.length >= 1) {
+  if (flowStage === 'linkedin') {
     return {
       kind: 'text',
-      text: `Got it${userName ? `, ${userName}` : ''}. Let's narrow this down: what's the most important constraint for this connection? Is it the role, the industry, the location, or the background?`,
+      text: `Got it. Do you have a LinkedIn profile I should use as additional context? You can paste it here, or say "no LinkedIn" to skip.`,
     }
   }
 
-  // Initial greeting
+  if (flowStage === 'specifics') {
+    return {
+      kind: 'text',
+      text: `Thanks. To help me find the best match, could you tell me a bit more about the ideal person's background or the specific industry expertise you're looking for?`,
+    }
+  }
+
   return {
     kind: 'text',
     text: `Hi${userName ? `, ${userName}` : ''}. Who do you want to find, and what would make this connection useful?`,
@@ -735,11 +720,66 @@ function getBearerToken(req) {
   return match ? match[1].trim() : ''
 }
 
-function extractProfile({ source = 'chat', contentSnippet = '', messages = [], initialQuery = '' }) {
+/**
+ * Extract a structured profile from chat history and uploads
+ * Uses DeepSeek if available for semantic extraction
+ */
+async function extractProfile({ source = 'chat', contentSnippet = '', messages = [], initialQuery = '' }) {
+  const apiKey = process.env.DEEPSEEK_API_KEY
+  const model = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
   const text = `${initialQuery} ${messages.map((message) => message.content).join(' ')} ${contentSnippet}`.toLowerCase()
 
+  if (apiKey && contentSnippet) {
+    try {
+      const prompt = `Analyze the following user data (chat history and uploaded AI history) and extract a structured professional profile for mentor matching.
+      
+DATA:
+${text.slice(0, 8000)}
+
+Return JSON:
+{
+  "summary": "Concise professional overview",
+  "specificReason": "Why they are looking for a mentor",
+  "industries": ["industry1", "industry2"],
+  "locations": ["location1"],
+  "skills": ["skill1"],
+  "interests": ["interest1"],
+  "goals": ["goal1"]
+}`
+      const response = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.1,
+          response_format: { type: 'json_object' },
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        const content = data?.choices?.[0]?.message?.content
+        if (content) {
+          const parsed = JSON.parse(content)
+          return {
+            ...parsed,
+            confidence: 'high',
+            mode: 'deepseek-extraction',
+          }
+        }
+      }
+    } catch (error) {
+      console.error('DeepSeek extraction failed:', error)
+    }
+  }
+
+  // Fallback to deterministic extraction
   return {
-    summary: `Private profile generated from ${source}. Context: ${text.slice(0, 500)}`,
+    summary: `Private profile generated from ${source}.`,
     specificReason: messages.find((message) => message.role === 'user')?.content || initialQuery,
     targetPerson: 'mentor or relevant operator',
     industries: pickSignals(text, ['hospitality', 'real estate', 'finance', 'startups', 'ai', 'policy', 'education', 'climate', 'luxury']),

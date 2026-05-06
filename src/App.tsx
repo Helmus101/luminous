@@ -240,6 +240,10 @@ function App() {
       setLinkedinUrl(clean)
       setFlowStage('ai_history')
       void extractLinkedin(clean)
+    } else if (flowStage === 'goal') {
+      setFlowStage('specifics')
+    } else if (flowStage === 'specifics') {
+      setFlowStage('linkedin')
     }
 
     await requestChat(next, activeToken)
@@ -617,6 +621,18 @@ function Message({
               The best results come from uploading a ChatGPT or Claude export. Otherwise, just click Continue.
             </p>
             <div className="upload-options">
+              <button
+                type="button"
+                className="upload-btn"
+                onClick={() => {
+                  const goal = messages.find(m => m.role === 'user')?.content || 'my goal'
+                  const prompt = `Summarize my professional background, key projects, technical strengths, working style, and specifically the type of mentor or operator I need to meet for ${goal}. Make it concise but high-signal for a semantic matching system.`
+                  navigator.clipboard.writeText(prompt)
+                  alert('Prompt copied to clipboard! Paste it into ChatGPT/Claude, then paste the result here.')
+                }}
+              >
+                Copy summary prompt
+              </button>
               <button type="button" className="upload-btn" onClick={() => void startConnection()}>
                 Continue without
               </button>
@@ -671,19 +687,19 @@ function ConnectionPayloadView({
       <h3 className="connection-header">{payload.title}</h3>
       <p className="connection-subtext">{payload.text}</p>
       <div className="outreach-flow">
-        <span className="outreach-step done">
+        <span className={`outreach-step ${selectedCandidateId ? 'done' : 'active'}`}>
           <span className="outreach-step-indicator" />
-          Outgoing
+          {selectedCandidateId ? 'Candidate selected' : 'Selection pending'}
         </span>
         <span className="outreach-step-arrow">→</span>
         <span className={`outreach-step ${selectedCandidateId ? 'active' : ''}`}>
           <span className="outreach-step-indicator" />
-          Interested
+          {selectedCandidateId ? 'Outreach queued' : 'Waiting'}
         </span>
         <span className="outreach-step-arrow">→</span>
         <span className="outreach-step">
           <span className="outreach-step-indicator" />
-          Warm intro
+          Consent given
         </span>
       </div>
       {payload.candidates?.length ? (
