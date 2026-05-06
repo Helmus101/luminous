@@ -146,7 +146,35 @@ export async function deleteAllChatHistory(email) {
   }
 }
 
-// 4. SEMANTIC SEARCH / MATCHING (Used by legacy or as fallback)
+// 4. CAMPUS CANVAS
+export async function getCampusesWithScouts() {
+  const { data: campuses, error: cError } = await supabase
+    .from('campuses')
+    .select('*')
+    .order('name', { ascending: true });
+
+  if (cError) {
+    console.error('Error fetching campuses:', cError);
+    return [];
+  }
+
+  const { data: scouts, error: sError } = await supabase
+    .from('people')
+    .select('id, name, current_role_text, campus_id')
+    .not('campus_id', 'is', null);
+
+  if (sError) {
+    console.error('Error fetching scouts:', sError);
+    return campuses.map(c => ({ ...c, scouts: [] }));
+  }
+
+  return campuses.map(campus => ({
+    ...campus,
+    scouts: scouts.filter(s => s.campus_id === campus.id)
+  }));
+}
+
+// 5. SEMANTIC SEARCH / MATCHING (Used by legacy or as fallback)
 export async function findBestMatches(userContext) {
   const { data: people, error } = await supabase
     .from('people')
