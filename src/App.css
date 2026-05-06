@@ -15,16 +15,16 @@
   --soft: #f9fafb;
   
   /* iMessage Bubble Colors - Professional Zinc/Slate */
-  --bubble-user: #18181b; /* zinc-900 */
+  --bubble-user: #09090b; /* zinc-950 */
   --bubble-user-text: #ffffff;
   --bubble-assistant: #f4f4f5; /* zinc-100 */
-  --bubble-assistant-text: #18181b;
-  --bubble-radius: 18px;
+  --bubble-assistant-text: #09090b;
+  --bubble-radius: 20px;
   --bubble-radius-pointed: 4px;
   
   /* Subtle accent for interactive elements */
-  --accent: #27272a; /* zinc-800 */
-  --accent-hover: #18181b;
+  --accent: #18181b; /* zinc-900 */
+  --accent-hover: #09090b;
   
   /* Premium timing */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -107,20 +107,19 @@ button:disabled {
 }
 
 .landing-header-signin {
-  padding: 8px 16px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--ink-secondary);
+  padding: 10px 20px;
+  border: 1px solid var(--ink);
+  border-radius: 12px;
+  background: var(--ink);
+  color: #fff;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   transition: all 0.2s var(--ease-out);
 }
 
 .landing-header-signin:hover {
-  background: var(--soft);
-  border-color: var(--muted);
-  color: var(--ink);
+  background: var(--ink-secondary);
+  border-color: var(--ink-secondary);
 }
 
 .landing-view {
@@ -401,20 +400,20 @@ button:disabled {
   gap: 6px;
   padding: 6px 12px;
   border-radius: 20px;
-  background: var(--soft);
-  font-size: 12px;
+  background: var(--faint);
+  font-size: 11px;
   font-weight: 600;
-  color: var(--muted);
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .quota-badge.warning {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--muted);
 }
 
 .quota-badge.empty {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--ink-secondary);
 }
 
 .quota-dot {
@@ -483,11 +482,12 @@ button:disabled {
 }
 
 .bubble {
-  max-width: min(80%, 520px);
-  padding: 12px 16px;
+  max-width: min(85%, 540px);
+  padding: 14px 18px;
   font-size: 15px;
   line-height: 1.55;
   word-wrap: break-word;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 /* Assistant bubble - iMessage style with pointed tail */

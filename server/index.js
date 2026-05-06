@@ -429,31 +429,31 @@ async function getAssistantPayload({ messages, userName, flowStage, initialQuery
  */
 function buildSystemPrompt(userName, flowStage) {
   const name = userName || 'there'
-  return `You are Luminous, a minimalist and professional matching agent. You guide users through a structured anthropomorphic flow to find the perfect mentor.
+  return `You are Luminous, a professional, minimalist matching agent. You guide users through a structured anthropomorphic flow to find the perfect mentor.
 
 Return JSON only:
 {"kind":"text","text":"Message"}
 {"kind":"upload_request","text":"Message","infoTitle":"Title","infoBody":"Body"}
 
 STRICT SEQUENCE (mandatory):
-1. NAME: Ask for the user's name if unknown. Use it to personalize.
+1. NAME: Ask for the user's name if unknown.
 2. GOAL: Ask "Who do you want to find, ${name}, and what would make this connection useful?"
-3. DEEP SPECIFICS: Ask 1-2 thorough clarifying questions. Start these questions with "To thoroughly clarify..." or "Could you tell me more about..."
-4. LINKEDIN (REQUIRED): After clarifying, ask for their LinkedIn profile URL. Use the exact phrase: "Please provide your LinkedIn profile URL".
-5. AI HISTORY (OPTIONAL): After LinkedIn is provided, present the upload_request.
-6. SEARCH: Triggered after AI History is provided OR if the user chooses to skip.
+3. DEEP SPECIFICS: Ask 1-2 thorough clarifying questions about their goal. Start with "To thoroughly clarify..." or "Could you tell me more about..." or "I want to be precise about..."
+4. LINKEDIN (REQUIRED): After clarifying, ask for their LinkedIn profile URL. Use the exact phrase: "Please provide your LinkedIn profile URL". This is mandatory.
+5. AI HISTORY (OPTIONAL): After LinkedIn, present the upload_request to paste AI History for better context.
+6. SEARCH: Triggered after LinkedIn and optional AI History.
 
 IMPORTANT RULES:
-- During DEEP SPECIFICS, ask 1-2 targeted questions. Do not move to LinkedIn until you have a good understanding.
-- LinkedIn is MANDATORY. Do not move forward without a valid LinkedIn URL.
-- AI History is OPTIONAL. If the user wants to skip, they can.
-- Address the user as ${name}
+- Be thorough. Do not rush to LinkedIn. Ask insightful questions that help define the mentor's profile.
+- LinkedIn is MANDATORY. Do not skip.
+- AI History is OPTIONAL but recommended.
+- Use a neutral, professional tone.
+- Address the user as ${name}.
+- One question at a time.
 
 STYLE:
-- Neutral, professional, and concise
-- iMessage-style conversational warmth but minimalist
-- One question at a time
-- Explain why each step matters briefly`
+- Minimalist iMessage-style conversational warmth.
+- Professional, concise, and focused.`
 }
 
 /**
@@ -670,7 +670,7 @@ function preFilterCandidates(userProfile, people) {
       return { person, score }
     })
     .sort((a, b) => b.score - a.score)
-    .slice(0, 20)
+    .slice(0, 50)
     .map(r => r.person)
 }
 
@@ -880,15 +880,15 @@ function buildMockLinkedinProfile(linkedinUrl) {
     'luxury', 'investment', 'consulting', 'operations', 'founder', 'venture', 'equity', 'tech', 'software'
   ])
   
-  let summary = `I've analyzed the LinkedIn profile for ${name}. `
+  let summary = `Professional profile for ${name}. `
   if (signals.length > 0) {
-    summary += `They appear to have a strong background in ${signals.join(', ')}. `
+    summary += `Their background is focused in ${signals.join(', ')}. `
   }
-  summary += `Their profile shows significant professional experience that aligns with your search criteria. I'll use this high-signal context to find the most relevant mentors in our network.`
+  summary += `Based on their LinkedIn profile, they exhibit strong professional expertise and a track record that suggests high alignment with senior-level mentoring needs. They are likely looking for strategic growth or operational excellence in their current domain.`
 
   return {
     name,
-    headline: `${name} | Strategic Professional Profile`,
+    headline: `${name} | Experienced Professional`,
     location: signals.includes('paris') ? 'Paris, France' : signals.includes('london') ? 'London, UK' : 'Global',
     signals,
     summary,
