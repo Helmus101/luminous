@@ -57,7 +57,7 @@ Please be specific and concrete. Instead of "I want a mentor in hospitality," te
 
 type Role = 'user' | 'assistant'
 type Screen = 'landing' | 'auth' | 'chat'
-type FlowStage = 'name' | 'goal' | 'linkedin' | 'ai_history' | 'search'
+type FlowStage = 'name' | 'goal' | 'specifics' | 'linkedin' | 'ai_history' | 'search'
 
 type AssistantPayload =
   | { kind: 'text'; text: string }
@@ -216,6 +216,8 @@ function App() {
       setFlowStage('ai_history')
     } else if (lastAssistantMessage.includes('linkedin profile url')) {
       setFlowStage('linkedin')
+    } else if (lastAssistantMessage.includes('thoroughly clarify') || lastAssistantMessage.includes('tell me more about')) {
+      setFlowStage('specifics')
     } else if (lastAssistantMessage.includes('who do you want to find')) {
       setFlowStage('goal')
     } else {
@@ -271,7 +273,6 @@ function App() {
       setSelectedCandidateId('')
       setLinkedinUrl('')
       setGeneratedProfile(null)
-      setImportFile(null)
       setPastedHistory('')
       setImportStatus('')
       setError(null)
@@ -326,20 +327,24 @@ function App() {
     }
 
     if (flowStage === 'goal') {
-      setFlowStage('linkedin')
-      const followUp: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: 'I see. Please provide your LinkedIn profile URL so I can understand your background better. This is required for matching.'
-      }
-      setMessages(prev => [...prev, followUp])
+      setFlowStage('specifics')
+      await requestChat(next, activeToken)
       return
-    } else if (flowStage === 'linkedin' && looksLikeLinkedin(clean)) {
+    }
+
+    if (flowStage === 'specifics') {
+      // In specifics stage, we let the AI drive. 
+      // If the AI asks for LinkedIn, the detectFlowStage will eventually catch it 
+      // or we can manually check if it was asked.
+      await requestChat(next, activeToken)
+      return
+    }
+
+    if (flowStage === 'linkedin' && looksLikeLinkedin(clean)) {
       setLinkedinUrl(clean)
       setFlowStage('ai_history')
       void extractLinkedin(clean)
-      // We will wait for extractLinkedin to finish and it will send its own message
-      // and requestChat will then be called or triggered by the assistant's next move.
+      return
     } else if (flowStage === 'linkedin') {
       // Mandatory LinkedIn check
       const errorMsg: ChatMessage = {
@@ -380,7 +385,9 @@ function App() {
       if (data.chatSessionId) setChatSessionId(String(data.chatSessionId))
 
       const assistantMsg = makeAssistant(data.message)
-      setMessages((current) => [...current, assistantMsg])
+      const newMessages = [...history, assistantMsg]
+      setMessages(newMessages)
+      detectFlowStage(newMessages)
 
       if (data.message?.kind === 'upload_request') {
         setFlowStage('ai_history')
@@ -537,6 +544,21 @@ function App() {
   if (screen === 'landing') {
     return (
       <main className="app-shell">
+        <header className="landing-header">
+          <div className="landing-header-inner">
+            <div className="landing-header-logo" />
+            <button
+              type="button"
+              className="landing-header-signin"
+              onClick={() => {
+                setScreen('auth')
+                setAuthMode('signin')
+              }}
+            >
+              Sign In
+            </button>
+          </div>
+        </header>
         <section className="landing-view">
           <div className="landing-content">
             <div className="landing-logo" />
@@ -557,18 +579,6 @@ function App() {
               />
               <button type="submit" className="landing-submit" disabled={!heroQuery.trim()}>
                 Start
-              </button>
-            </div>
-            <div className="landing-auth-row">
-              <button
-                type="button"
-                className="landing-signin"
-                onClick={() => {
-                  setScreen('auth')
-                  setAuthMode('signin')
-                }}
-              >
-                Already have an account? Sign in
               </button>
             </div>
           </form>
