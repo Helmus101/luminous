@@ -89,6 +89,40 @@ button:disabled {
    Landing View - Minimalist Entry
    ============================================ */
 
+.landing-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 24px;
+  z-index: 10;
+}
+
+.landing-header-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.landing-header-signin {
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s var(--ease-out);
+}
+
+.landing-header-signin:hover {
+  background: var(--soft);
+  border-color: var(--muted);
+  color: var(--ink);
+}
+
 .landing-view {
   min-height: 100svh;
   display: flex;
@@ -195,28 +229,6 @@ button:disabled {
 
 .landing-submit:hover:not(:disabled) {
   background: var(--ink-secondary);
-}
-
-.landing-auth-row {
-  display: flex;
-  justify-content: center;
-  margin-top: 20px;
-}
-
-.landing-signin {
-  padding: 10px 20px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 500;
-  transition: all 0.2s var(--ease-out);
-  text-decoration: underline;
-  text-underline-offset: 4px;
-}
-
-.landing-signin:hover {
-  color: var(--ink);
 }
 
 /* ============================================
@@ -735,43 +747,6 @@ button:disabled {
   padding: 14px;
   font-size: 15px;
   font-weight: 600;
-}
-
-.file-drop {
-  display: block;
-  border: 2px dashed var(--line);
-  border-radius: 14px;
-  padding: 28px 20px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.2s var(--ease-out);
-}
-
-.file-drop:hover {
-  border-color: var(--muted);
-  background: var(--soft);
-}
-
-.file-drop.dragover {
-  border-color: var(--ink);
-  background: var(--soft);
-}
-
-.file-drop-label {
-  display: block;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink);
-  margin-bottom: 4px;
-}
-
-.file-drop-hint {
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.file-drop input[type="file"] {
-  display: none;
 }
 
 .upload-status {

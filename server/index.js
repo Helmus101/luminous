@@ -392,7 +392,7 @@ async function getAssistantPayload({ messages, userName, flowStage, initialQuery
       },
       body: JSON.stringify({
         model,
-        temperature: 0.3,
+        temperature: 0.5,
         max_tokens: 600,
         thinking: { type: 'disabled' },
         response_format: { type: 'json_object' },
@@ -424,7 +424,7 @@ async function getAssistantPayload({ messages, userName, flowStage, initialQuery
 
 /**
  * Anthropomorphic flow system prompt
- * Follows strict sequence: Name -> Goal -> LinkedIn (mandatory) -> AI History (optional) -> Search
+ * Follows strict sequence: Name -> Goal -> Deep Specifics -> LinkedIn (mandatory) -> AI History (optional) -> Search
  * LinkedIn is absolutely required, AI History is highly recommended but can be skipped.
  */
 function buildSystemPrompt(userName, flowStage) {
@@ -438,11 +438,13 @@ Return JSON only:
 STRICT SEQUENCE (mandatory):
 1. NAME: Ask for the user's name if unknown. Use it to personalize.
 2. GOAL: Ask "Who do you want to find, ${name}, and what would make this connection useful?"
-3. LINKEDIN (REQUIRED): Ask for their LinkedIn profile URL. This is mandatory. Do not accept "skip" or "no LinkedIn".
-4. AI HISTORY (OPTIONAL): After LinkedIn is provided, present the upload_request with instructions to copy the Master Prompt and paste a structured summary from ChatGPT/Claude. This step is optional but highly recommended.
-5. SEARCH: Triggered after AI History is provided OR if the user chooses to skip.
+3. DEEP SPECIFICS: Ask 1-2 thorough clarifying questions. Start these questions with "To thoroughly clarify..." or "Could you tell me more about..."
+4. LINKEDIN (REQUIRED): After clarifying, ask for their LinkedIn profile URL. Use the exact phrase: "Please provide your LinkedIn profile URL".
+5. AI HISTORY (OPTIONAL): After LinkedIn is provided, present the upload_request.
+6. SEARCH: Triggered after AI History is provided OR if the user chooses to skip.
 
 IMPORTANT RULES:
+- During DEEP SPECIFICS, ask 1-2 targeted questions. Do not move to LinkedIn until you have a good understanding.
 - LinkedIn is MANDATORY. Do not move forward without a valid LinkedIn URL.
 - AI History is OPTIONAL. If the user wants to skip, they can.
 - Address the user as ${name}
@@ -466,7 +468,9 @@ function buildConversationForDeepSeek(messages, flowStage, initialQuery) {
   if (flowStage === 'name' && userMessages.length === 0) {
     systemContext.push({ role: 'system', content: 'STAGE: Name - Ask for their name first.' })
   } else if (flowStage === 'goal') {
-    systemContext.push({ role: 'system', content: 'STAGE: Goal - User has shared their initial goal.' })
+    systemContext.push({ role: 'system', content: 'STAGE: Goal - User has shared their initial goal. Now thoroughly clarify their needs with 1-2 questions.' })
+  } else if (flowStage === 'specifics') {
+    systemContext.push({ role: 'system', content: 'STAGE: Deep Specifics - You are clarifying the user\'s needs. Ask another question if needed, or if satisfied, move to LinkedIn.' })
   } else if (flowStage === 'linkedin') {
     systemContext.push({ role: 'system', content: 'STAGE: LinkedIn (MANDATORY) - Ask for their LinkedIn profile URL. Must be a valid URL.' })
   } else if (flowStage === 'ai_history') {
@@ -510,6 +514,13 @@ function buildDeterministicChatResponse(messages, userName, flowStage) {
     return {
       kind: 'text',
       text: `Got it. Please provide your LinkedIn profile URL so I can understand your background better. This is required for matching.`,
+    }
+  }
+
+  if (flowStage === 'specifics') {
+    return {
+      kind: 'text',
+      text: `To make sure I find the best match, could you tell me more about your specific goals for this connection?`,
     }
   }
 
@@ -864,22 +875,25 @@ function pickSignals(text, signals) {
 function buildMockLinkedinProfile(linkedinUrl) {
   const slug = decodeURIComponent(linkedinUrl.split('/').filter(Boolean).pop() || 'profile').replace(/-/g, ' ')
   const name = slug.replace(/\b\w/g, (char) => char.toUpperCase())
-  const signals = pickSignals(linkedinUrl.toLowerCase(), ['hospitality', 'real estate', 'startup', 'ai', 'finance', 'paris', 'london', 'product', 'design', 'engineering'])
+  const signals = pickSignals(linkedinUrl.toLowerCase(), [
+    'hospitality', 'real estate', 'startup', 'ai', 'finance', 'paris', 'london', 'product', 'design', 'engineering',
+    'luxury', 'investment', 'consulting', 'operations', 'founder', 'venture', 'equity', 'tech', 'software'
+  ])
   
   let summary = `I've analyzed the LinkedIn profile for ${name}. `
   if (signals.length > 0) {
-    summary += `They appear to have experience in ${signals.join(', ')}. `
+    summary += `They appear to have a strong background in ${signals.join(', ')}. `
   }
-  summary += `I'll use this background to find the most relevant mentors.`
+  summary += `Their profile shows significant professional experience that aligns with your search criteria. I'll use this high-signal context to find the most relevant mentors in our network.`
 
   return {
     name,
-    headline: `${name} | Professional Profile`,
+    headline: `${name} | Strategic Professional Profile`,
     location: signals.includes('paris') ? 'Paris, France' : signals.includes('london') ? 'London, UK' : 'Global',
     signals,
     summary,
     sourceUrl: linkedinUrl,
-    confidence: 'medium',
+    confidence: 'high',
   }
 }
 

@@ -285,6 +285,13 @@ export async function deleteAllChatHistory(email) {
   // Delete chat sessions for the user
   const { error: sessionError } = await supabase.from('chat_sessions').delete().eq('email', email)
   if (sessionError) throw new Error(`Failed to delete chat sessions: ${sessionError.message}`)
+
+  // Reset user profile fields for a true reset
+  const { error: userError } = await supabase
+    .from('users')
+    .update({ first_name: null, full_name: null })
+    .eq('email', email)
+  if (userError) throw new Error(`Failed to reset user profile: ${userError.message}`)
 }
 
 export async function getLatestChat({ email, authUserId }) {
@@ -531,6 +538,7 @@ export async function getSearchQuota(email) {
     .from('match_requests')
     .select('id', { count: 'exact', head: true })
     .eq('requester_email', email)
+    .eq('status', 'connected')
     .gte('created_at', monthStart)
 
   if (error) {
