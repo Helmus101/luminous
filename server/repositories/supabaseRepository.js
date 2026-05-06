@@ -727,17 +727,13 @@ function buildConsentEmailRecord({
 }) {
   const body = `Hi ${recipientName},
 
-Luminous found a possible connection: ${otherName}.
+I am Luminous, an AI matching agent. I've identified you as a high-signal connection for ${otherName}.
 
-Profile: ${otherLinkedin}
+Context: ${otherLinkedin}
 
-Why Luminous thinks this is relevant:
-${reason}
+Match reasoning: ${reason}
 
-Quick context:
-${profileSummary}
-
-Would you like to connect? Reply yes or no.
+Would you be open to a double opt-in introduction?
 
 Best,
 Luminous`
@@ -784,9 +780,6 @@ function toPublicCandidate(candidateRow, person, candidate) {
 }
 
 function buildMailtoUrl({ to, subject, body }) {
-  const params = new URLSearchParams({
-    subject,
-    body,
-  })
-  return `mailto:${encodeURIComponent(to)}?${params.toString()}`
+  const query = `subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  return `mailto:${encodeURIComponent(to)}?${query}`
 }
