@@ -57,7 +57,7 @@ Please be specific and concrete. Instead of "I want a mentor in hospitality," te
 
 type Role = 'user' | 'assistant'
 type Screen = 'landing' | 'auth' | 'chat'
-type FlowStage = 'name' | 'goal' | 'specifics' | 'linkedin' | 'ai_history' | 'search'
+type FlowStage = 'name' | 'goal' | 'linkedin' | 'ai_history' | 'search'
 
 type AssistantPayload =
   | { kind: 'text'; text: string }
@@ -209,10 +209,10 @@ function App() {
 
   function detectFlowStage(msgs: ChatMessage[]) {
     const combined = msgs.map(m => m.content).join(' ').toLowerCase()
-    if (/linkedin\.com|linkedin profile|no linkedin|don't have|do not have/i.test(combined)) {
+    if (/linkedin\.com|linkedin profile/i.test(combined)) {
       setFlowStage('linkedin')
     }
-    if (/upload|export|attached|chatgpt|claude|skip/i.test(combined)) {
+    if (/upload|export|attached|chatgpt|claude/i.test(combined)) {
       setFlowStage('ai_history')
     }
   }
@@ -229,6 +229,7 @@ function App() {
     if (heroQuery.trim()) {
       const goal: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: heroQuery.trim() }
       setMessages([intro, goal])
+      setFlowStage('goal')
       await requestChat([intro, goal], token, '')
     } else {
       setTimeout(async () => {
@@ -254,6 +255,22 @@ function App() {
   ) {
     const clean = text.trim()
     if (!clean || isSending) return
+
+    // Secret command to reset everything
+    if (clean === 'deleteall--00') {
+      setMessages([])
+      setChatSessionId('')
+      setFlowStage('name')
+      setChatInput('')
+      try {
+        await fetch('/api/chat/all', { method: 'DELETE', headers: authHeaders() })
+        setMessages([{ id: crypto.randomUUID(), role: 'assistant', content: 'History cleared. What should I call you?' }])
+      } catch {
+        setError('Could not clear history on server.')
+      }
+      return
+    }
+
     const activeToken = options.token || accessToken
     if (!options.skipAuthCheck && !isAuthed) {
       setScreen('auth')
@@ -290,36 +307,24 @@ function App() {
     }
 
     if (flowStage === 'goal') {
-      setFlowStage('specifics')
-    } else if (flowStage === 'specifics') {
       setFlowStage('linkedin')
       const followUp: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: 'Do you have a LinkedIn profile? If yes, paste the URL. If not, just say so.'
+        content: 'I see. Please provide your LinkedIn profile URL so I can understand your background better.'
       }
       setMessages(prev => [...prev, followUp])
-      return // Don't call requestChat yet, wait for LinkedIn response
+      return
     } else if (flowStage === 'linkedin' && looksLikeLinkedin(clean)) {
       setLinkedinUrl(clean)
       setFlowStage('ai_history')
       void extractLinkedin(clean)
-    } else if (flowStage === 'linkedin' && /no linkedin|don't have|do not have|don't have a|do not have a|skip/i.test(clean.toLowerCase())) {
-      // User says they don't have LinkedIn - still require AI History
-      setFlowStage('ai_history')
-      const followUp: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: 'No problem. Let\'s move on to the required context step. I\'ll ask for your AI history export next.'
-      }
-      setMessages(prev => [...prev, followUp])
-      return
     } else if (flowStage === 'linkedin') {
-      // Invalid response - prompt for LinkedIn
+      // Mandatory LinkedIn check
       const errorMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: 'Please provide a valid LinkedIn URL (e.g., https://linkedin.com/in/yourname) or indicate if you don\'t have one.'
+        content: 'LinkedIn is required to proceed. Please provide a valid LinkedIn URL (e.g., https://linkedin.com/in/yourname).'
       }
       setMessages(prev => [...prev, errorMsg])
       return
@@ -864,7 +869,7 @@ function isValidEmail(value: string) {
 }
 
 function looksLikeLinkedin(text: string) {
-  return /linkedin\.com\/(in|pub)\//i.test(text)
+  return /^https?:\/\/(www\.)?linkedin\.com\/(in|pub)\/[a-z0-9%_-]+\/?/i.test(text.trim())
 }
 
 export default App

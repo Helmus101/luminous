@@ -416,7 +416,7 @@ button:disabled {
   align-items: flex-end;
   gap: 8px;
   margin: 16px 0;
-  animation: messageIn 0.3s var(--ease-out) both;
+  animation: messageIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
 }
 
 .message-row.assistant {
@@ -886,7 +886,7 @@ button:disabled {
 @keyframes messageIn {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.98);
+    transform: translateY(12px) scale(0.95);
   }
   to {
     opacity: 1;

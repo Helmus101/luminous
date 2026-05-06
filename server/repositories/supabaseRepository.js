@@ -274,6 +274,19 @@ export async function saveChatTranscript({ email, authUserId, sessionId, initial
   return { sessionId: resolvedSessionId, savedMessages: rows.length }
 }
 
+export async function deleteAllChatHistory(email) {
+  const supabase = getSupabaseClient()
+  if (!supabase) return
+
+  // Delete chat messages for the user
+  const { error: msgError } = await supabase.from('chat_messages').delete().eq('email', email)
+  if (msgError) throw new Error(`Failed to delete chat messages: ${msgError.message}`)
+
+  // Delete chat sessions for the user
+  const { error: sessionError } = await supabase.from('chat_sessions').delete().eq('email', email)
+  if (sessionError) throw new Error(`Failed to delete chat sessions: ${sessionError.message}`)
+}
+
 export async function getLatestChat({ email, authUserId }) {
   const supabase = getSupabaseClient()
   let query = supabase.from('chat_sessions').select('*').order('updated_at', { ascending: false }).limit(1)
