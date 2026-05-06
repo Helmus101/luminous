@@ -1,72 +1,69 @@
-import { mentors } from './mentors.js';
+import { findBestMatches } from './repositories/supabaseRepository.js';
 
-// 1. SEMANTIC AI MATCHING (DeepSeek Integration Simulation)
-// In a production app, we would use embeddings or a re-ranking model.
-// For now, we simulate "Semantic Compatibility" by scoring intent, skills, and industry.
-
+// SEMANTIC MATCHING ENGINE
 export async function generateChatResponse(messages, email) {
   const lastUserMessage = messages[messages.length - 1].content.toLowerCase();
 
-  // HEURISTIC: Check if user is asking for matches
+  // 1. MATCHING TRIGGER: User asks for mentor/search
   if (lastUserMessage.includes('search') || lastUserMessage.includes('match') || lastUserMessage.includes('mentor')) {
     
-    // Simulate AI "Thinking" and Ranking
-    const topMatches = mentors
-      .map(m => {
-        // Calculate semantic compatibility score
-        let score = 0;
-        if (lastUserMessage.includes(m.industry.toLowerCase())) score += 40;
-        if (m.expertise.some(e => lastUserMessage.includes(e.toLowerCase()))) score += 30;
-        // Random "Anthropomorphic" variance for human feel
-        score += Math.floor(Math.random() * 20); 
-        
-        return { 
-          name: m.name, 
-          reason: `Highly compatible due to shared focus on ${m.industry} and your specific interest in AI Safety.`,
-          linkedinUrl: `https://linkedin.com/in/${m.name.toLowerCase().replace(' ', '')}`,
-          score 
-        };
-      })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 2); // Return top 2 as per requirement
+    // REALLY use the context: concatenate last few messages to understand the user's intent
+    const context = messages.slice(-5).map(m => m.content).join(' ');
+    
+    // Call our Supabase repository to perform the semantic matching
+    const bestMatches = await findBestMatches(context);
+
+    if (!bestMatches || bestMatches.length === 0) {
+      return {
+        text: "I've searched our database using your context, but I couldn't find an exact match right now. Could you tell me more about the specific skills or industry you're interested in?",
+        payload: { kind: 'text', text: "No matches found" }
+      };
+    }
+
+    const candidates = bestMatches.map(m => ({
+      id: m.id,
+      name: m.name,
+      reason: `Based on your interest in ${m.expertise?.slice(0, 2).join(', ')}, ${m.name}'s background in ${m.current_role_text} makes them a great fit.`,
+      linkedinUrl: m.linkedin_url || `https://linkedin.com/in/${m.name.toLowerCase().replace(' ', '')}`
+    }));
 
     return {
-      text: "I've searched our network for the best suited people for you. Based on your background and what you're looking for, these two seem like perfect matches.",
+      text: "I've analyzed our mentor network against your professional background and goals. Here are the best matches I found for you:",
       payload: {
         kind: 'connection_started',
-        title: "Top Matches Found",
-        text: "I've analyzed compatibility across industries, skills, and mentor availability.",
-        candidates: topMatches,
-        queuedEmails: 2,
-        note: "Select someone to initiate a blinded outreach."
+        title: "Top Matches",
+        text: "Ranked by semantic alignment with your current trajectory.",
+        candidates: candidates,
+        queuedEmails: candidates.length,
+        note: "You can select 3 mentors for introduction each month."
       }
     };
   }
 
-  // GREETING & CONTEXT GATHERING
-  if (messages.length === 2 && lastUserMessage.length > 0) {
+  // 2. CONTEXT GATHERING: First response after name
+  if (messages.length === 2) {
     return {
-      text: `Nice to meet you! To find the best mentor, I'll need to understand two things: what you do, and what you want to achieve. Do you have a LinkedIn profile I can analyze, or would you like to provide a quick summary of your career history?`,
+      text: `Nice to meet you! To help me find the best mentor for you, I'll need a bit more context. Do you have a LinkedIn URL I can analyze, or would you like to provide a summary of your career history?`,
       payload: {
         kind: 'upload_request',
-        infoTitle: "Share your Context",
-        infoBody: "I can extract your professional background from a LinkedIn link or a chat history export (Claude/ChatGPT)."
+        infoTitle: "Profile Context",
+        infoBody: "I can extract relevant details from your LinkedIn profile or a chat history export."
       }
     };
   }
 
+  // DEFAULT CONVERSATIONAL RESPONSE
   return {
-    text: "Tell me more about the specific reason you want to connect with a mentor today. The more details I have, the better my matching algorithm performs."
+    text: "I'm listening. The more you share about your challenges and goals, the better my matching algorithm will perform. What else should I know about what you're looking for?"
   };
 }
 
 export async function extractStructuredProfile(linkedinUrl) {
-  // Simulate DeepSeek extracting structured data from a URL
-  // In reality: Fetch HTML -> Clean -> LLM Extract JSON
+  // Simulate DeepSeek Extraction from LinkedIn
   return {
-    skills: ['AI Safety', 'Product Design', 'Neural Networks'],
+    skills: ['Strategic Planning', 'Leadership', 'Product Development'],
     industry: 'Technology',
-    goals: ['Transition to AI research', 'Build a startup'],
+    goals: ['Career transition', 'Leadership growth'],
     confidence: 'high'
   };
 }
