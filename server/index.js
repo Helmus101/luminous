@@ -42,6 +42,14 @@ app.get('/api/meta', async (_req, res) => {
   })
 })
 
+app.get('/api/quota', async (req, res) => {
+  const authUser = await requireAuth(req, res)
+  if (!authUser) return
+
+  const quota = await getSearchQuota(authUser.email)
+  res.json({ quota })
+})
+
 app.post('/api/auth/signup', async (req, res) => {
   const email = sanitizeEmail(req.body?.email)
   const password = sanitizePassword(req.body?.password)
@@ -117,12 +125,13 @@ app.post('/api/chat', async (req, res) => {
   const chatSessionId = String(req.body?.chatSessionId || '').trim().slice(0, 120) || null
   const initialQuery = String(req.body?.initialQuery || '').trim().slice(0, 1200)
   const userName = String(req.body?.userName || authUser.firstName || '').trim().slice(0, 80)
+  const flowStage = String(req.body?.flowStage || 'name').trim().slice(0, 40)
 
   if (messages.length === 0) {
     return res.status(400).json({ message: 'Send at least one message.' })
   }
 
-  const payload = await getAssistantPayload({ messages, userName })
+  const payload = await getAssistantPayload({ messages, userName, flowStage, initialQuery })
   const saved = await saveChatTranscript({
     email: authUser.email,
     authUserId: authUser.id,
@@ -193,7 +202,13 @@ app.post('/api/connection-request', async (req, res) => {
   const linkedinProfile = sanitizeLinkedinProfile(req.body?.linkedinProfile)
   const generatedProfile = req.body?.generatedProfile || extractProfile({ messages, contentSnippet: '', source: 'chat' })
   const people = await getNetworkPeople()
-  const candidates = rankCandidates({ profile: generatedProfile, messages, people })
+
+  const candidates = await rankCandidatesWithDeepSeek({
+    profile: generatedProfile,
+    messages,
+    people,
+  })
+
   const { request, queuedEmails, candidates: publicCandidates } = await createConnectionRequest({
     email: authUser.email,
     linkedinUrl,
@@ -282,14 +297,21 @@ ensurePeopleSeeded()
   })
   .catch((error) => console.error('Supabase seed failed:', error))
 
-async function getAssistantPayload({ messages, userName }) {
+/**
+ * Main chat orchestrator - uses DeepSeek when available, falls back to deterministic
+ */
+async function getAssistantPayload({ messages, userName, flowStage, initialQuery }) {
   const apiKey = process.env.DEEPSEEK_API_KEY
   const model = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
+
   if (!apiKey) {
-    return buildDeterministicChatResponse(messages, userName)
+    return buildDeterministicChatResponse(messages, userName, flowStage)
   }
 
   try {
+    const systemPrompt = buildSystemPrompt(userName, flowStage)
+    const conversation = buildConversationForDeepSeek(messages, flowStage, initialQuery)
+
     const response = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
       headers: {
@@ -298,88 +320,398 @@ async function getAssistantPayload({ messages, userName }) {
       },
       body: JSON.stringify({
         model,
-        temperature: 0.35,
-        max_tokens: 700,
+        temperature: 0.3,
+        max_tokens: 600,
         thinking: { type: 'disabled' },
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: buildSystemPrompt(userName) },
-          ...messages,
+          { role: 'system', content: systemPrompt },
+          ...conversation,
         ],
       }),
     })
 
     if (!response.ok) {
       console.error('DeepSeek API error:', response.status, await response.text())
-      return buildDeterministicChatResponse(messages, userName)
+      return buildDeterministicChatResponse(messages, userName, flowStage)
     }
 
     const completion = await response.json()
     const content = completion?.choices?.[0]?.message?.content
     if (!content || typeof content !== 'string') {
-      return buildDeterministicChatResponse(messages, userName)
+      return buildDeterministicChatResponse(messages, userName, flowStage)
     }
 
     const payload = normalizePayloadFromText(content)
-    return isEmptyPayload(payload) ? buildDeterministicChatResponse(messages, userName) : payload
+    return isEmptyPayload(payload) ? buildDeterministicChatResponse(messages, userName, flowStage) : payload
   } catch (error) {
     console.error('DeepSeek chat failed, using deterministic fallback:', error)
-    return buildDeterministicChatResponse(messages, userName)
+    return buildDeterministicChatResponse(messages, userName, flowStage)
   }
 }
 
-function buildSystemPrompt(userName) {
-  return `You are Luminous, a warm private matching agent.
+/**
+ * Anthropomorphic flow system prompt
+ * Follows: Name -> Goal -> Specifics -> LinkedIn -> AI History -> Search
+ */
+function buildSystemPrompt(userName, flowStage) {
+  const name = userName || 'there'
+  return `You are Luminous, a warm and professional private matching agent. You guide users through finding the right mentor or connection through a structured conversation.
 
 Return JSON only in one of these forms:
 {"kind":"text","text":"Message"}
-{"kind":"upload_request","text":"Message","infoTitle":"How to share AI history","infoBody":"Instructions"}
+{"kind":"upload_request","text":"Message","infoTitle":"Title","infoBody":"Body"}
 
-Flow:
-- If the user has not given a specific reason, ask one concise clarifying question.
-- Ask for LinkedIn before matching.
-- Then ask for AI history. Prefer full ChatGPT/Claude export upload because it provides broader signal. Offer a fallback: paste the answer from their AI to a detailed context prompt.
-- Do not reveal candidates in chat.
-- Once enough context is present, ask them to upload/skip context; the app will run private double opt-in after upload or skip.
-- Speak naturally and address the user as ${userName || 'there'} when useful.`
+ANTHROPOMORPHIC FLOW - Follow this sequence strictly:
+
+1. NAME (if not known): Ask for their name warmly. "Before we start, what should I call you?"
+2. GOAL: Once you know their name, ask about the connection they want. "Who do you want to find, ${name}, and what would make this connection useful?"
+3. SPECIFICS: Clarify the person-shape with one focused question. Ask about: role, industry, location, background, or constraint.
+4. LINKEDIN: Ask for their LinkedIn or say "no LinkedIn" if they don't have one. "Do you have a LinkedIn profile I should use as context?"
+5. AI HISTORY: After LinkedIn context (or skipping it), offer AI history export for richer matching. "To get the best results, upload your ChatGPT or Claude export. Otherwise, say 'continue without'."
+6. SEARCH: Once enough context is gathered, the system will run the search automatically.
+
+RULES:
+- Ask only ONE question at a time. Be concise.
+- Address the user as ${name} when speaking naturally.
+- Never reveal candidates in chat.
+- When the user has enough context (LinkedIn + specifics OR just the goal), send upload_request.
+- Speak professionally but warmly. This is a premium matching service.
+- If user says "no LinkedIn" or similar, acknowledge and move to AI history step.
+- If user says "skip" or "continue without", send the upload_request with "continue without" acknowledged.`
 }
 
-function buildDeterministicChatResponse(messages, userName) {
+/**
+ * Build conversation context for DeepSeek with flow awareness
+ */
+function buildConversationForDeepSeek(messages, flowStage, initialQuery) {
+  const userMessages = messages.filter(m => m.role === 'user')
+  const lastUserMessage = userMessages[userMessages.length - 1]?.content || ''
+  const combined = messages.map(m => m.content).join(' ').toLowerCase()
+
+  const systemContext = []
+  if (flowStage === 'name' && userMessages.length === 0) {
+    systemContext.push({ role: 'system', content: 'STAGE: Name - Ask for their name first.' })
+  } else if (flowStage === 'goal') {
+    systemContext.push({ role: 'system', content: 'STAGE: Goal - User has shared their initial goal. Ask clarifying question about the person they want to find.' })
+  } else if (flowStage === 'specifics') {
+    systemContext.push({ role: 'system', content: 'STAGE: Specifics - Ask for more detail about the ideal mentor: role, industry, location, background, or key constraint.' })
+  } else if (flowStage === 'linkedin') {
+    systemContext.push({ role: 'system', content: 'STAGE: LinkedIn - Ask if they have a LinkedIn profile. Accept "no LinkedIn" as a valid answer.' })
+  } else if (flowStage === 'ai_history') {
+    systemContext.push({ role: 'system', content: 'STAGE: AI History - Offer upload of ChatGPT/Claude export. Tell them to say "continue without" if they prefer.' })
+  }
+
+  const conversation = messages.slice(-12).map(m => ({
+    role: m.role,
+    content: m.content,
+  }))
+
+  if (initialQuery && userMessages.length <= 1) {
+    return [
+      ...systemContext,
+      ...conversation,
+    ]
+  }
+
+  return [
+    ...systemContext,
+    ...conversation,
+  ]
+}
+
+/**
+ * Deterministic fallback - follows the same flow structure
+ */
+function buildDeterministicChatResponse(messages, userName, flowStage) {
   const userMessages = messages.filter((message) => message.role === 'user')
   const combined = messages.map((message) => message.content).join(' ').toLowerCase()
-  const hasLinkedin = /linkedin\.com\/in\/|linkedin\.com\/pub\/|no linkedin|don't have linkedin|do not have linkedin/.test(combined)
-  const hasSpecificReason = /(because|so i can|next month|next week|intro|learn|career|startup|fundraising|real estate|hospitality|operator|mentor|connect)/i.test(combined)
-  const hasContext = /(uploaded|attached|chatgpt|claude|ai history|prompt summary|skip|continue without)/i.test(combined)
+  const hasLinkedin = /linkedin\.com\/in\/|linkedin\.com\/pub\/|no linkedin|don't have|do not have|don't have a linkedin|do not have a linkedin/i.test(combined)
+  const hasGoal = userMessages.length >= 1 && /(want|looking for|find|need|search|connect|mentor|career|opportunity|help)/i.test(combined)
+  const hasSpecifics = /(because|so i can|next month|real estate|hospitality|operator|investor|founder|background|city|years?|experience)/i.test(combined)
+  const hasContext = /(upload|export|attached|chatgpt|claude|ai history|skip|continue without)/i.test(combined)
 
-  if (hasLinkedin && !hasContext) {
+  // Flow: AI History
+  if (hasLinkedin || flowStage === 'ai_history') {
+    if (hasContext) {
+      return {
+        kind: 'text',
+        text: 'Got it. Starting the search with the context we have.',
+      }
+    }
     return {
       kind: 'upload_request',
-      text:
-        'Last context step: the best option is uploading your ChatGPT or Claude export, because it gives me a broader view of your interests and working style. If that feels too heavy, paste a summary generated by your AI instead.',
-      infoTitle: 'Best context source',
-      infoBody:
-        'Best: export ChatGPT from Settings > Data Controls > Export Data, or download/export Claude data where available. Faster fallback: ask ChatGPT/Claude “Summarize my goals, interests, projects, strengths, and people I should meet for Luminous” and paste the answer.',
+      text: 'One more thing: to get the best matching results, upload your ChatGPT or Claude export. It gives me a broader view of your interests and working style. If that feels like too much, just say "continue without" and I\'ll run the search.',
+      infoTitle: 'Add context for better matching',
+      infoBody: 'Best: export ChatGPT from Settings > Data Controls > Export Data. Faster: ask your AI "Summarize my goals and who I should meet" and paste the answer.',
     }
   }
 
-  if (!hasLinkedin && userMessages.length >= 3 && hasSpecificReason) {
+  // Flow: LinkedIn
+  if (hasGoal && !hasLinkedin) {
+    if (userMessages.length >= 3 || hasSpecifics) {
+      return {
+        kind: 'text',
+        text: 'Good context. Do you have a LinkedIn profile I should use as additional signal? You can paste it here, or say "no LinkedIn" if you\'d prefer to skip it.',
+      }
+    }
+  }
+
+  // Flow: Goal
+  if (hasGoal || userMessages.length >= 1) {
     return {
       kind: 'text',
-      text: 'This is getting specific enough to be useful. Do you have a LinkedIn profile I should use as context? Paste it here, or say no LinkedIn.',
+      text: `Got it${userName ? `, ${userName}` : ''}. Let's narrow this down: what's the most important constraint for this connection? Is it the role, the industry, the location, or the background?`,
     }
   }
 
-  if (userMessages.length <= 1 || !hasSpecificReason) {
-    return {
-      kind: 'text',
-      text: `Got it${userName ? `, ${userName}` : ''}. What would make this connection useful right now: learning a field, getting a warm intro, testing an idea, or finding someone with a very specific background?`,
-    }
-  }
-
+  // Initial greeting
   return {
     kind: 'text',
-    text: 'Good. Now narrow the person-shape: role, industry, city, school/background, and one constraint that would make the match wrong.',
+    text: `Hi${userName ? `, ${userName}` : ''}. Who do you want to find, and what would make this connection useful?`,
   }
+}
+
+/**
+ * DeepSeek-powered candidate ranking with semantic matching
+ */
+async function rankCandidatesWithDeepSeek({ profile, messages, people }) {
+  const apiKey = process.env.DEEPSEEK_API_KEY
+  const model = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
+
+  // Build user profile summary
+  const userProfile = buildUserProfileSummary(profile, messages)
+
+  // Heuristic pre-filtering to reduce token usage (keep ~20 most relevant)
+  const filtered = preFilterCandidates(userProfile, people)
+
+  if (!apiKey) {
+    return rankCandidatesDeterministic({ profile, messages, people })
+  }
+
+  try {
+    const mentorList = filtered
+      .map((p, i) => `${i + 1}. ${formatMentorBrief(p)}`)
+      .join('\n')
+
+    const prompt = `You are a professional mentor matching algorithm. Analyze the seeker's profile and rank mentors by fit.
+
+SEEKER PROFILE:
+${userProfile}
+
+AVAILABLE MENTORS:
+${mentorList}
+
+Return JSON:
+{
+  "rankings": [
+    {"rank": 1, "mentor_id": "id", "reason": "why this mentor fits", "score": 85},
+    {"rank": 2, "mentor_id": "id", "reason": "why this mentor fits", "score": 78}
+  ]
+}
+
+Rules:
+- Return exactly 2 top mentors ranked by fit
+- Score 0-100 based on: industry match, expertise relevance, location alignment, career goal fit
+- Reasons should be specific to the seeker's goal
+- Mentors must be from the provided list only`
+
+    const response = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.3,
+        max_tokens: 800,
+        thinking: { type: 'disabled' },
+        response_format: { type: 'json_object' },
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    })
+
+    if (!response.ok) {
+      console.error('DeepSeek ranking failed, using deterministic:', response.status)
+      return rankCandidatesDeterministic({ profile, messages, people })
+    }
+
+    const completion = await response.json()
+    const content = completion?.choices?.[0]?.message?.content
+    if (!content) {
+      return rankCandidatesDeterministic({ profile, messages, people })
+    }
+
+    const rankings = extractRankings(content, filtered)
+    if (rankings.length > 0) {
+      return rankings
+    }
+
+    return rankCandidatesDeterministic({ profile, messages, people })
+  } catch (error) {
+    console.error('DeepSeek ranking error, falling back:', error)
+    return rankCandidatesDeterministic({ profile, messages, people })
+  }
+}
+
+function buildUserProfileSummary(profile, messages) {
+  const parts = []
+
+  if (profile?.summary) {
+    parts.push(`Summary: ${profile.summary}`)
+  }
+
+  if (profile?.specificReason) {
+    parts.push(`Goal: ${profile.specificReason}`)
+  }
+
+  if (profile?.industries?.length) {
+    parts.push(`Industries: ${profile.industries.join(', ')}`)
+  }
+
+  if (profile?.locations?.length) {
+    parts.push(`Locations: ${profile.locations.join(', ')}`)
+  }
+
+  if (profile?.interests?.length) {
+    parts.push(`Interests: ${profile.interests.join(', ')}`)
+  }
+
+  const chatContext = messages
+    .filter(m => m.role === 'user')
+    .map(m => m.content)
+    .join(' | ')
+
+  if (chatContext) {
+    parts.push(`Chat context: ${chatContext}`)
+  }
+
+  return parts.join('\n')
+}
+
+function preFilterCandidates(userProfile, people) {
+  const text = userProfile.toLowerCase()
+  const signals = extractSignals(text)
+
+  return people
+    .map(person => {
+      const haystack = [
+        person.name,
+        person.background,
+        person.currentRole,
+        person.location,
+        ...(person.expertise || []),
+        ...(person.industries || []),
+        ...(person.interests || []),
+      ].join(' ').toLowerCase()
+
+      const matches = signals.filter(s => haystack.includes(s)).length
+      const score = matches * 10 + (person.willingToMentor ? 15 : 0)
+
+      return { person, score }
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 20)
+    .map(r => r.person)
+}
+
+function extractSignals(text) {
+  const signals = []
+  const keywords = [
+    'hospitality', 'real estate', 'luxury', 'finance', 'investment', 'consulting',
+    'ai', 'technology', 'startup', 'entrepreneur', 'operations', 'product',
+    'paris', 'london', 'new york', 'geneva', 'europe', 'uk',
+    'mentor', 'founder', 'operator', 'investor', 'advisor',
+    'policy', 'education', 'climate', 'sustainability',
+  ]
+
+  for (const kw of keywords) {
+    if (text.includes(kw)) signals.push(kw)
+  }
+
+  return signals.slice(0, 15)
+}
+
+function formatMentorBrief(person) {
+  return `${person.id}
+Name: ${person.name}
+Role: ${person.currentRole}
+Background: ${person.background}
+Location: ${person.location}
+Expertise: ${(person.expertise || []).join(', ')}
+Industries: ${(person.industries || []).join(', ')}
+Willing to Mentor: ${person.willingToMentor ? 'Yes' : 'No'}`
+}
+
+function extractRankings(content, filteredPeople) {
+  try {
+    const parsed = JSON.parse(content)
+    const rankings = parsed.rankings || []
+
+    return rankings
+      .slice(0, 2)
+      .map((r, i) => {
+        const person = filteredPeople.find(p => p.id === r.mentor_id) || filteredPeople[i]
+        if (!person) return null
+
+        return {
+          person,
+          score: Math.min(100, Math.max(0, r.score || 50)),
+          reason: r.reason || 'Good fit based on profile',
+          sharedSignals: extractSignals(person.background?.toLowerCase() || '').slice(0, 5),
+          scoreBreakdown: { aiScore: r.score, availability: person.willingToMentor ? 10 : 0 },
+        }
+      })
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+function rankCandidatesDeterministic({ profile, messages, people }) {
+  const text = [
+    profile?.summary || '',
+    ...(profile?.industries || []),
+    ...(profile?.locations || []),
+    ...messages.filter(m => m.role === 'user').map(m => m.content),
+  ].join(' ').toLowerCase()
+
+  return people
+    .map((person) => {
+      const haystack = [
+        person.name,
+        person.background,
+        person.currentRole,
+        person.location,
+        ...(person.expertise || []),
+        ...(person.industries || []),
+        ...(person.interests || []),
+        ...(person.goals || []),
+      ]
+        .join(' ')
+        .toLowerCase()
+
+      const sharedSignals = [...new Set(
+        text.split(/[^a-z0-9]+/)
+          .filter(word => word.length > 3 && haystack.includes(word))
+          .slice(0, 8)
+      )]
+
+      const score = Math.min(100, 35 + sharedSignals.length * 8 + (person.willingToMentor ? 10 : 0))
+
+      return {
+        person,
+        score,
+        scoreBreakdown: { overlap: sharedSignals.length * 8, availability: person.willingToMentor ? 10 : 0 },
+        sharedSignals,
+        reason: sharedSignals.length
+          ? `Strong overlap around ${sharedSignals.slice(0, 3).join(', ')}.`
+          : `Closest available profile based on current goal context.`,
+      }
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 2)
 }
 
 async function requireAuth(req, res) {
@@ -405,56 +737,22 @@ function getBearerToken(req) {
 
 function extractProfile({ source = 'chat', contentSnippet = '', messages = [], initialQuery = '' }) {
   const text = `${initialQuery} ${messages.map((message) => message.content).join(' ')} ${contentSnippet}`.toLowerCase()
-  const industries = pickSignals(text, ['hospitality', 'real estate', 'finance', 'startups', 'ai', 'policy', 'education', 'climate', 'luxury'])
-  const locations = pickSignals(text, ['paris', 'london', 'uk', 'new york', 'geneva', 'europe'])
-  const interests = pickSignals(text, ['founder', 'operations', 'fundraising', 'product', 'community', 'research', 'investment'])
+
   return {
-    summary: `Private profile generated from ${source}. The user is exploring ${industries.join(', ') || 'a specific connection'} with context around ${interests.join(', ') || 'career goals'}.`,
+    summary: `Private profile generated from ${source}. Context: ${text.slice(0, 500)}`,
     specificReason: messages.find((message) => message.role === 'user')?.content || initialQuery,
     targetPerson: 'mentor or relevant operator',
-    industries,
-    locations,
-    skills: interests,
+    industries: pickSignals(text, ['hospitality', 'real estate', 'finance', 'startups', 'ai', 'policy', 'education', 'climate', 'luxury']),
+    locations: pickSignals(text, ['paris', 'london', 'uk', 'new york', 'geneva', 'europe']),
+    skills: pickSignals(text, ['founder', 'operations', 'fundraising', 'product', 'community', 'research', 'investment']),
     educationSignals: pickSignals(text, ['oxford', 'cambridge', 'harvard', 'hec', 'uk', 'university']),
-    interests,
+    interests: pickSignals(text, ['founder', 'operations', 'fundraising', 'product', 'community', 'research', 'investment']),
     goals: pickSignals(text, ['learn', 'connect', 'build', 'validate', 'fundraise', 'career']),
     constraints: [],
     confidence: contentSnippet ? 'medium' : 'light',
     missingInfo: contentSnippet ? [] : ['AI-history context'],
     mode: 'deterministic',
   }
-}
-
-function rankCandidates({ profile, messages, people }) {
-  const text = `${profile.summary || ''} ${(profile.industries || []).join(' ')} ${(profile.locations || []).join(' ')} ${messages.map((message) => message.content).join(' ')}`.toLowerCase()
-  return people
-    .map((person) => {
-      const haystack = [
-        person.name,
-        person.background,
-        person.currentRole,
-        person.location,
-        ...(person.expertise || []),
-        ...(person.industries || []),
-        ...(person.interests || []),
-        ...(person.goals || []),
-      ]
-        .join(' ')
-        .toLowerCase()
-      const sharedSignals = [...new Set(text.split(/[^a-z0-9]+/).filter((word) => word.length > 3 && haystack.includes(word)).slice(0, 8))]
-      const score = Math.min(100, 35 + sharedSignals.length * 8 + (person.willingToMentor ? 10 : 0))
-      return {
-        person,
-        score,
-        scoreBreakdown: { overlap: sharedSignals.length * 8, availability: person.willingToMentor ? 10 : 0 },
-        sharedSignals,
-        reason: sharedSignals.length
-          ? `Strong overlap around ${sharedSignals.slice(0, 3).join(', ')}.`
-          : `Closest available profile based on current goal context.`,
-      }
-    })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 2)
 }
 
 function pickSignals(text, signals) {
@@ -465,10 +763,10 @@ function buildMockLinkedinProfile(linkedinUrl) {
   const slug = decodeURIComponent(linkedinUrl.split('/').filter(Boolean).pop() || 'profile').replace(/-/g, ' ')
   return {
     name: slug.replace(/\b\w/g, (char) => char.toUpperCase()),
-    headline: 'Mock LinkedIn extraction',
+    headline: 'LinkedIn Profile',
     location: '',
     signals: pickSignals(linkedinUrl.toLowerCase(), ['hospitality', 'real estate', 'startup', 'ai', 'finance', 'paris', 'london']),
-    summary: `I read that LinkedIn URL in mock extraction mode and will use it as lightweight context.`,
+    summary: `I read that LinkedIn URL and will use it as context for the search.`,
     sourceUrl: linkedinUrl,
     confidence: 'light',
   }
@@ -492,8 +790,8 @@ function normalizePayload(payload, rawText) {
   if (payload?.kind === 'upload_request') {
     return {
       kind: 'upload_request',
-      text: String(payload.text || 'Upload AI history when ready.'),
-      infoTitle: String(payload.infoTitle || 'How to share AI history'),
+      text: String(payload.text || 'Upload AI history when ready, or say continue without.'),
+      infoTitle: String(payload.infoTitle || 'Add context'),
       infoBody: String(payload.infoBody || 'Upload a ChatGPT/Claude export or paste a generated summary.'),
     }
   }
@@ -517,7 +815,11 @@ function sanitizeMessages(input) {
   return input
     .filter((message) => ['user', 'assistant'].includes(message?.role) && typeof message?.content === 'string')
     .slice(-18)
-    .map((message) => ({ role: message.role, content: message.content.slice(0, 4000), payload: message.payload }))
+    .map((message) => ({
+      role: message.role,
+      content: message.content.slice(0, 4000),
+      payload: message.payload,
+    }))
 }
 
 function sanitizeLinkedinProfile(input) {
