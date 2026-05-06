@@ -19,6 +19,8 @@
   --bubble-user-text: #ffffff;
   --bubble-assistant: #f1f1f2;
   --bubble-assistant-text: #000000;
+  --bubble-radius: 20px;
+  --bubble-radius-pointed: 4px;
   
   /* Subtle accent for interactive elements */
   --accent: #4b5563;
@@ -454,19 +456,19 @@ button:disabled {
   word-wrap: break-word;
 }
 
-/* Assistant bubble - iMessage style */
+/* Assistant bubble - iMessage style with pointed tail */
 .message-row.assistant .bubble {
   position: relative;
   color: var(--bubble-assistant-text);
   background: var(--bubble-assistant);
-  border-radius: 20px;
+  border-radius: var(--bubble-radius) var(--bubble-radius) var(--bubble-radius) var(--bubble-radius-pointed);
 }
 
-/* User bubble - iMessage dark style */
+/* User bubble - iMessage dark style with pointed tail on right */
 .message-row.user .bubble {
   color: var(--bubble-user-text);
   background: var(--bubble-user);
-  border-radius: 20px;
+  border-radius: var(--bubble-radius) var(--bubble-radius) var(--bubble-radius-pointed) var(--bubble-radius);
 }
 
 .bubble p {
@@ -622,6 +624,11 @@ button:disabled {
 
 .upload-btn.primary:hover {
   background: var(--ink-secondary);
+}
+
+.upload-btn.primary.copied {
+  background: #16a34a;
+  border-color: #16a34a;
 }
 
 .file-drop {

@@ -2,6 +2,59 @@ import { useEffect, useRef, useState, type DragEvent } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
 
+// Master Prompt for AI History extraction - provides detailed context for professional matching
+const MASTER_PROMPT = `You are a professional context extraction system for a mentor matching service called Luminous.
+
+TASK: Generate a high-density professional profile summary that will be used for semantic matching with potential mentors.
+
+Please create a structured summary by copying and pasting this prompt into ChatGPT or Claude:
+
+---
+CRAFT YOUR LUMINOUS PROFILE
+
+To find you the ideal mentor connection, I need to understand your professional journey, working style, and what makes a mentor match truly valuable.
+
+Please respond to each section below with specific, concrete details. Be honest about gaps — they help us match better.
+
+1. PROFESSIONAL BACKGROUND
+   - Current role and company (or last role if between positions)
+   - Industry/sector you work in
+   - 3-5 key responsibilities or accomplishments
+   - Any notable transitions in your career and why
+
+2. DOMAIN EXPERTISE
+   - Primary skills you're known for
+   - Industries or functions where you have deep experience
+   - Any technical expertise or specialized knowledge
+   - Languages (if relevant to your work)
+
+3. WORKING STYLE & LEADERSHIP APPROACH
+   - How you prefer to work (autonomous, collaborative, etc.)
+   - Your management or leadership style
+   - How you approach problem-solving
+   - What you look for in professional relationships
+
+4. CURRENT GOALS & CHALLENGES
+   - What you're trying to achieve in your career or business
+   - The specific challenge or gap you're trying to address
+   - Why a mentor relationship would be valuable right now
+   - What "success" looks like for you in this connection
+
+5. IDEAL MENTOR PROFILE
+   - Role/background of the mentor you want (e.g., founder, operator, investor)
+   - Industry expertise that would be most valuable
+   - Geographic preferences or constraints
+   - What you hope to learn or gain from the relationship
+
+6. CONTEXT SIGNALS
+   - Education or credentials (if relevant to your goals)
+   - Personal qualities that drive your work
+   - Any constraints or non-negotiables
+   - Networks or communities you're part of
+
+Please be specific and concrete. Instead of "I want a mentor in hospitality," tell me whether you need operational expertise, investment perspective, or operator experience. The more specific you are, the better we can match you.
+---`
+
 type Role = 'user' | 'assistant'
 type Screen = 'landing' | 'auth' | 'chat'
 type FlowStage = 'name' | 'goal' | 'specifics' | 'linkedin' | 'ai_history' | 'search'
@@ -236,14 +289,40 @@ function App() {
       return
     }
 
-    if (looksLikeLinkedin(clean)) {
-      setLinkedinUrl(clean)
-      setFlowStage('ai_history')
-      void extractLinkedin(clean)
-    } else if (flowStage === 'goal') {
+    if (flowStage === 'goal') {
       setFlowStage('specifics')
     } else if (flowStage === 'specifics') {
       setFlowStage('linkedin')
+      const followUp: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'Do you have a LinkedIn profile? If yes, paste the URL. If not, just say so.'
+      }
+      setMessages(prev => [...prev, followUp])
+      return // Don't call requestChat yet, wait for LinkedIn response
+    } else if (flowStage === 'linkedin' && looksLikeLinkedin(clean)) {
+      setLinkedinUrl(clean)
+      setFlowStage('ai_history')
+      void extractLinkedin(clean)
+    } else if (flowStage === 'linkedin' && /no linkedin|don't have|do not have|don't have a|do not have a|skip/i.test(clean.toLowerCase())) {
+      // User says they don't have LinkedIn - still require AI History
+      setFlowStage('ai_history')
+      const followUp: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'No problem. Let\'s move on to the required context step. I\'ll ask for your AI history export next.'
+      }
+      setMessages(prev => [...prev, followUp])
+      return
+    } else if (flowStage === 'linkedin') {
+      // Invalid response - prompt for LinkedIn
+      const errorMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'Please provide a valid LinkedIn URL (e.g., https://linkedin.com/in/yourname) or indicate if you don\'t have one.'
+      }
+      setMessages(prev => [...prev, errorMsg])
+      return
     }
 
     await requestChat(next, activeToken)
@@ -523,7 +602,6 @@ function App() {
                 isDragover={isDragover}
                 setIsDragover={setIsDragover}
                 uploadHistory={uploadHistory}
-                startConnection={startConnection}
                 importStatus={importStatus}
                 selectedCandidateId={selectedCandidateId}
                 onChooseCandidate={chooseCandidate}
@@ -576,7 +654,6 @@ function Message({
   isDragover,
   setIsDragover,
   uploadHistory,
-  startConnection,
   importStatus,
   selectedCandidateId,
   onChooseCandidate,
@@ -587,7 +664,6 @@ function Message({
   isDragover: boolean
   setIsDragover: (value: boolean) => void
   uploadHistory: () => Promise<void>
-  startConnection: () => Promise<void>
   importStatus: string
   selectedCandidateId: string
   onChooseCandidate: (requestId: string, candidate: Candidate) => Promise<void>
@@ -616,25 +692,48 @@ function Message({
         <p>{message.content}</p>
         {message.payload?.kind === 'upload_request' && (
           <div className="upload-card">
-            <h3 className="upload-title">Add context (optional)</h3>
+            <h3 className="upload-title">Add context (required)</h3>
             <p className="upload-description">
-              The best results come from uploading a ChatGPT or Claude export. Otherwise, just click Continue.
+              This step is required for matching. The best results come from using the Master Prompt to generate a structured summary in ChatGPT or Claude, then pasting the result here.
             </p>
             <div className="upload-options">
               <button
                 type="button"
-                className="upload-btn"
-                onClick={() => {
-                  const goal = messages.find(m => m.role === 'user')?.content || 'my goal'
-                  const prompt = `Summarize my professional background, key projects, technical strengths, working style, and specifically the type of mentor or operator I need to meet for ${goal}. Make it concise but high-signal for a semantic matching system.`
-                  navigator.clipboard.writeText(prompt)
-                  alert('Prompt copied to clipboard! Paste it into ChatGPT/Claude, then paste the result here.')
+                className="upload-btn primary"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(MASTER_PROMPT)
+                    // Show feedback
+                    const btn = document.activeElement as HTMLButtonElement
+                    if (btn) {
+                      const original = btn.textContent
+                      btn.textContent = 'Copied!'
+                      btn.classList.add('copied')
+                      setTimeout(() => {
+                        btn.textContent = original
+                        btn.classList.remove('copied')
+                      }, 2000)
+                    }
+                  } catch {
+                    // Fallback for environments where clipboard API isn't available
+                    const textarea = document.createElement('textarea')
+                    textarea.value = MASTER_PROMPT
+                    textarea.style.position = 'fixed'
+                    textarea.style.opacity = '0'
+                    document.body.appendChild(textarea)
+                    textarea.select()
+                    document.execCommand('copy')
+                    document.body.removeChild(textarea)
+                    const btn = document.activeElement as HTMLButtonElement
+                    if (btn) {
+                      const original = btn.textContent
+                      btn.textContent = 'Copied!'
+                      setTimeout(() => { btn.textContent = original }, 2000)
+                    }
+                  }
                 }}
               >
-                Copy summary prompt
-              </button>
-              <button type="button" className="upload-btn" onClick={() => void startConnection()}>
-                Continue without
+                Copy Master Prompt
               </button>
             </div>
             <div
@@ -644,9 +743,9 @@ function Message({
               onDrop={handleDrop}
             >
               <label className="file-drop-label">
-                {importFile ? importFile.name : 'Drop file or click to browse'}
+                {importFile ? importFile.name : 'Paste AI summary or drop file'}
               </label>
-              <span className="file-drop-hint">JSON, TXT, HTML, MD export</span>
+              <span className="file-drop-hint">Paste ChatGPT/Claude output or drop JSON, TXT, HTML, MD export</span>
               <input
                 type="file"
                 accept=".json,.txt,.html,.md,.zip"
@@ -765,7 +864,7 @@ function isValidEmail(value: string) {
 }
 
 function looksLikeLinkedin(text: string) {
-  return /linkedin\.com\/(in|pub)\//i.test(text) || /no linkedin|don't have|do not have|don't have a linkedin|do not have a linkedin/i.test(text)
+  return /linkedin\.com\/(in|pub)\//i.test(text)
 }
 
 export default App
