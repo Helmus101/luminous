@@ -197,6 +197,29 @@ button:disabled {
   background: var(--ink-secondary);
 }
 
+.landing-auth-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.landing-signin {
+  padding: 10px 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s var(--ease-out);
+}
+
+.landing-signin:hover {
+  border-color: var(--muted);
+  color: var(--ink);
+  background: var(--soft);
+}
+
 /* ============================================
    Auth View - Clean & Focused
    ============================================ */
@@ -629,6 +652,84 @@ button:disabled {
 .upload-btn.primary.copied {
   background: #16a34a;
   border-color: #16a34a;
+}
+
+.required-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
+.paste-section {
+  margin-bottom: 16px;
+}
+
+.paste-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  margin-bottom: 8px;
+}
+
+.paste-textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  resize: vertical;
+  min-height: 120px;
+  outline: none;
+  transition: all 0.2s var(--ease-out);
+  line-height: 1.5;
+}
+
+.paste-textarea::placeholder {
+  color: var(--faint);
+}
+
+.paste-textarea:focus {
+  border-color: var(--muted);
+  box-shadow: 0 0 0 3px rgba(75, 85, 99, 0.08);
+}
+
+.upload-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  color: var(--faint);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.upload-divider::before,
+.upload-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.process-btn {
+  margin-top: 16px;
+  width: 100%;
+  padding: 14px;
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .file-drop {
