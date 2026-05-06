@@ -278,20 +278,26 @@ export async function deleteAllChatHistory(email) {
   const supabase = getSupabaseClient()
   if (!supabase) return
 
-  // Delete chat messages for the user
-  const { error: msgError } = await supabase.from('chat_messages').delete().eq('email', email)
-  if (msgError) throw new Error(`Failed to delete chat messages: ${msgError.message}`)
+  // Delete everything related to this email
+  // Also clean up connections and consent emails
+  const { data: requests } = await supabase.from('match_requests').select('id').eq('requester_email', email)
+  if (requests?.length) {
+    const ids = requests.map(r => r.id)
+    await supabase.from('consent_emails').delete().in('request_id', ids)
+    await supabase.from('connections').delete().in('request_id', ids)
+    await supabase.from('match_candidates').delete().in('request_id', ids)
+  }
 
-  // Delete chat sessions for the user
-  const { error: sessionError } = await supabase.from('chat_sessions').delete().eq('email', email)
-  if (sessionError) throw new Error(`Failed to delete chat sessions: ${sessionError.message}`)
+  await supabase.from('chat_messages').delete().eq('email', email)
+  await supabase.from('chat_sessions').delete().eq('email', email)
+  await supabase.from('match_requests').delete().eq('requester_email', email)
+  await supabase.from('profiles').delete().eq('email', email)
 
-  // Reset user profile fields for a true reset
-  const { error: userError } = await supabase
+  // Reset user profile fields
+  await supabase
     .from('users')
     .update({ first_name: null, full_name: null })
     .eq('email', email)
-  if (userError) throw new Error(`Failed to reset user profile: ${userError.message}`)
 }
 
 export async function getLatestChat({ email, authUserId }) {

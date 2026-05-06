@@ -210,15 +210,15 @@ function App() {
     const assistantMessages = msgs.filter(m => m.role === 'assistant')
     const lastAssistantMessage = assistantMessages[assistantMessages.length - 1]?.content.toLowerCase() || ''
     
-    if (lastAssistantMessage.includes('choose one person for this search') || lastAssistantMessage.includes('search complete')) {
+    if (lastAssistantMessage.includes('choose one person for this search') || lastAssistantMessage.includes('search complete') || lastAssistantMessage.includes('selection pending')) {
       setFlowStage('search')
-    } else if (lastAssistantMessage.includes('master prompt') || lastAssistantMessage.includes('add context')) {
+    } else if (lastAssistantMessage.includes('paste') || lastAssistantMessage.includes('ai history') || lastAssistantMessage.includes('context')) {
       setFlowStage('ai_history')
     } else if (lastAssistantMessage.includes('linkedin profile url')) {
       setFlowStage('linkedin')
-    } else if (lastAssistantMessage.includes('thoroughly clarify') || lastAssistantMessage.includes('tell me more about')) {
+    } else if (lastAssistantMessage.includes('thoroughly clarify') || lastAssistantMessage.includes('tell me more about') || lastAssistantMessage.includes('want to be precise')) {
       setFlowStage('specifics')
-    } else if (lastAssistantMessage.includes('who do you want to find')) {
+    } else if (lastAssistantMessage.includes('who do you want to find') || lastAssistantMessage.includes('goal')) {
       setFlowStage('goal')
     } else {
       setFlowStage('name')
@@ -343,7 +343,7 @@ function App() {
     if (flowStage === 'linkedin' && looksLikeLinkedin(clean)) {
       setLinkedinUrl(clean)
       setFlowStage('ai_history')
-      void extractLinkedin(clean)
+      void extractLinkedin(clean, next)
       return
     } else if (flowStage === 'linkedin') {
       // Mandatory LinkedIn check
@@ -399,7 +399,7 @@ function App() {
     }
   }
 
-  async function extractLinkedin(url: string) {
+  async function extractLinkedin(url: string, currentMessages: ChatMessage[]) {
     const response = await fetch('/api/linkedin-profile', {
       method: 'POST',
       headers: authHeaders(),
@@ -412,10 +412,10 @@ function App() {
         role: 'assistant',
         content: `${data.profile.summary} I'll use that as context for the search.`
       }
-      setMessages(current => [...current, msg])
+      setMessages([...currentMessages, msg])
       
       // After LinkedIn is extracted, trigger the AI History request
-      await requestChat([...messages, { id: crypto.randomUUID(), role: 'user', content: url }, msg])
+      await requestChat([...currentMessages, msg])
     }
   }
 
@@ -467,7 +467,7 @@ function App() {
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
         if (response.status === 429) {
-          setError('You have used your 3 searches for this month. Come back next month for more.')
+          setError('You have used your 3 successful introductions for this month. Come back next month for more.')
         } else {
           throw new Error(data.message || 'Could not start search.')
         }
@@ -533,12 +533,12 @@ function App() {
     if (!searchQuota) return null
     const remaining = searchQuota.remaining
     if (remaining === 0) {
-      return <span className="quota-badge empty"><span className="quota-dot" /> 0 searches left</span>
+      return <span className="quota-badge empty"><span className="quota-dot" /> 0 introductions left</span>
     }
     if (remaining === 1) {
-      return <span className="quota-badge warning"><span className="quota-dot" /> {remaining} search left</span>
+      return <span className="quota-badge warning"><span className="quota-dot" /> {remaining} introduction left</span>
     }
-    return <span className="quota-badge"><span className="quota-dot" /> {remaining} searches left</span>
+    return <span className="quota-badge"><span className="quota-dot" /> {remaining} introductions left</span>
   }
 
   if (screen === 'landing') {
@@ -734,7 +734,7 @@ function Message({
           <div className="upload-card">
             <h3 className="upload-title">Add context <span className="optional-badge">Optional</span></h3>
             <p className="upload-description">
-              This step is highly recommended for higher-fidelity matching. Use the Master Prompt below to generate a structured summary in ChatGPT or Claude, then paste the result here.
+              This step is highly recommended for professional matching. Use the Master Prompt below to generate a structured summary in ChatGPT or Claude, then paste the result here.
             </p>
             <div className="upload-options">
               <button
