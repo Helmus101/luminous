@@ -116,7 +116,7 @@ export async function saveChatTranscript(email, messages) {
   await supabase.from('chat_messages').insert(formattedMessages);
 }
 
-// 3. RESET COMMAND (deleteall--00)
+// 3. RESET COMMAND (deleteall--00) - Complete factory reset
 export async function deleteAllChatHistory(email) {
   const userId = await getUserIdByEmail(email);
   
@@ -133,16 +133,17 @@ export async function deleteAllChatHistory(email) {
   if (requests && requests.length > 0) {
     const requestIds = requests.map(r => r.id);
     
-    // Deletions will cascade for match_candidates, consent_emails, and connections 
-    // because of the "on delete cascade" in the schema
+    // Cascade delete for match_candidates, consent_emails, and connections
     await supabase.from('match_requests').delete().in('id', requestIds);
   }
   
   // 3. Delete profiles
   await supabase.from('profiles').delete().eq('email', email);
   
-  // 4. Delete from users (optional, but keep for full reset)
-  // if (userId) await supabase.from('users').delete().eq('id', userId);
+  // 4. Complete factory reset - delete user record
+  if (userId) {
+    await supabase.from('users').delete().eq('id', userId);
+  }
 }
 
 // 4. SEMANTIC SEARCH / MATCHING (Used by legacy or as fallback)

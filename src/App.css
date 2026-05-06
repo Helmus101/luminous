@@ -4,27 +4,27 @@
    ============================================ */
 
 :root {
-  /* Neutral Professional Palette */
-  --ink: #1a1a1a;
-  --ink-secondary: #374151;
-  --muted: #6b7280;
-  --faint: #9ca3af;
-  --line: #e5e7eb;
+  /* Neutral Professional Palette - Zinc/Slate */
+  --ink: #18181b;
+  --ink-secondary: #3f3f46;
+  --muted: #71717a;
+  --faint: #a1a1aa;
+  --line: #e4e4e7;
   --surface: #ffffff;
   --bg: #ffffff;
-  --soft: #f9fafb;
+  --soft: #f4f4f5;
   
   /* iMessage Bubble Colors - Professional Zinc/Slate */
-  --bubble-user: #09090b; /* zinc-950 */
+  --bubble-user: #18181b;
   --bubble-user-text: #ffffff;
-  --bubble-assistant: #f4f4f5; /* zinc-100 */
-  --bubble-assistant-text: #09090b;
+  --bubble-assistant: #f4f4f5;
+  --bubble-assistant-text: #18181b;
   --bubble-radius: 20px;
   --bubble-radius-pointed: 4px;
   
-  /* Subtle accent for interactive elements */
-  --accent: #18181b; /* zinc-900 */
-  --accent-hover: #09090b;
+  /* Accent for interactive elements */
+  --accent: #27272a;
+  --accent-hover: #18181b;
   
   /* Premium timing */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);

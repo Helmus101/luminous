@@ -27,7 +27,7 @@ type ChatMessage = {
 const welcomeMessage: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
-  content: "Hi, I'm Luminous. Before we start, what should I call you?",
+  content: "Hi, I'm Luminous. What should I call you?",
 }
 
 function isValidEmail(value: string) {
@@ -318,8 +318,8 @@ function App() {
                     <h3 className="upload-title">{m.payload.infoTitle}</h3>
                     <p className="upload-description">{m.payload.infoBody}</p>
                     <div className="upload-options">
-                        <button className="upload-btn primary" onClick={() => sendUserMessage("I'll paste my career history")}>
-                        Paste Context
+                        <button className="upload-btn primary" onClick={() => sendUserMessage("I'll paste a brief summary")}>
+                        Add Context
                         </button>
                         <button className="upload-btn" onClick={() => sendUserMessage("Skip & Search")}>
                         Skip & Search
