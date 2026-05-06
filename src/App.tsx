@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
 
 type Role = 'user' | 'assistant'
 type Screen = 'landing' | 'auth' | 'chat'
+type FlowStage = 'name' | 'goal' | 'specifics' | 'linkedin' | 'ai_history' | 'search'
 
 type AssistantPayload =
   | { kind: 'text'; text: string }
@@ -37,6 +38,13 @@ type Candidate = {
   sharedSignals?: string[]
 }
 
+type SearchQuota = {
+  limit: number
+  used: number
+  remaining: number
+  monthKey: string
+}
+
 const TOKEN_KEY = 'luminous-access-token'
 const EMAIL_KEY = 'luminous-email'
 const NAME_KEY = 'luminous-name'
@@ -49,7 +57,7 @@ function App() {
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '')
   const [displayName, setDisplayName] = useState(() => localStorage.getItem(NAME_KEY) || '')
-  const [needsName, setNeedsName] = useState(false)
+  const [flowStage, setFlowStage] = useState<FlowStage>('name')
   const [authError, setAuthError] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
@@ -57,11 +65,12 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [chatSessionId, setChatSessionId] = useState('')
   const [importFile, setImportFile] = useState<File | null>(null)
-  const [showHelp, setShowHelp] = useState(false)
+  const [isDragover, setIsDragover] = useState(false)
   const [importStatus, setImportStatus] = useState('')
   const [generatedProfile, setGeneratedProfile] = useState<unknown>(null)
   const [linkedinUrl, setLinkedinUrl] = useState('')
   const [selectedCandidateId, setSelectedCandidateId] = useState('')
+  const [searchQuota, setSearchQuota] = useState<SearchQuota | null>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
   const isAuthed = Boolean(accessToken && email)
 
@@ -74,6 +83,20 @@ function App() {
     if (email) localStorage.setItem(EMAIL_KEY, email)
     if (displayName) localStorage.setItem(NAME_KEY, displayName)
   }, [accessToken, displayName, email])
+
+   
+  useEffect(() => {
+    if (isAuthed && screen === 'chat') {
+      // Fire and forget - quota fetch is not critical
+      fetch('/api/quota', { headers: authHeaders() })
+         
+        .then(response => response.ok ? response.json() : null)
+         
+        .then(data => { if (data?.quota) setSearchQuota(data.quota) })
+        .catch(() => { /* Silently fail quota fetch */ })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthed, screen])
 
   function handleHeroSubmit(event: FormEvent) {
     event.preventDefault()
@@ -113,10 +136,12 @@ function App() {
     setScreen('chat')
 
     if (firstName) {
+      setFlowStage('goal')
       const loaded = await loadLatestChat(token)
       if (loaded) {
         setMessages(loaded.messages)
         setChatSessionId(loaded.chatSessionId)
+        detectFlowStage(loaded.messages)
         if (heroQuery.trim()) {
           await sendUserMessage(heroQuery.trim(), { token, baseMessages: loaded.messages, skipAuthCheck: true })
         }
@@ -124,28 +149,45 @@ function App() {
       }
       await startChatAfterName(firstName, token)
     } else {
-      setNeedsName(true)
+      setFlowStage('name')
       setMessages([{ id: crypto.randomUUID(), role: 'assistant', content: 'Before we start, what should I call you?' }])
     }
   }
 
+  function detectFlowStage(msgs: ChatMessage[]) {
+    const combined = msgs.map(m => m.content).join(' ').toLowerCase()
+    if (/linkedin\.com|linkedin profile|no linkedin|don't have|do not have/i.test(combined)) {
+      setFlowStage('linkedin')
+    }
+    if (/upload|export|attached|chatgpt|claude|skip/i.test(combined)) {
+      setFlowStage('ai_history')
+    }
+  }
+
   async function startChatAfterName(name: string, token = accessToken) {
-    setNeedsName(false)
     setError(null)
     const intro: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'assistant',
-      content: `Nice to meet you, ${name}. I’ll help sharpen the search before I run a private fit check.`,
+      content: `Nice to meet you, ${name}. I'm here to help you find the right person through a private, double opt-in process.`,
     }
-    if (!heroQuery.trim()) {
-      setMessages([intro, { id: crypto.randomUUID(), role: 'assistant', content: 'Who do you want to find?' }])
-      return
-    }
+    setMessages([intro])
 
-    const goal: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: heroQuery.trim() }
-    const next = [intro, goal]
-    setMessages(next)
-    await requestChat(next, token, '')
+    if (heroQuery.trim()) {
+      const goal: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: heroQuery.trim() }
+      setMessages([intro, goal])
+      await requestChat([intro, goal], token, '')
+    } else {
+      setTimeout(async () => {
+        const nextMsg: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Who do you want to find, and what would make this connection useful?'
+        }
+        setMessages(prev => [...prev, nextMsg])
+        setFlowStage('goal')
+      }, 300)
+    }
   }
 
   async function handleChatSubmit(event: FormEvent) {
@@ -170,25 +212,33 @@ function App() {
     setMessages(next)
     setChatInput('')
 
-    if (needsName) {
+    if (flowStage === 'name') {
       const name = clean.split(/\s+/)[0]
-      const response = await fetch('/api/user-profile', {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ fullName: clean }),
-      })
-      if (!response.ok) {
+      try {
+        const response = await fetch('/api/user-profile', {
+          method: 'PATCH',
+          headers: authHeaders(),
+          body: JSON.stringify({ fullName: clean }),
+        })
+        if (!response.ok) throw new Error('Could not save your name.')
+        setDisplayName(name)
+        localStorage.setItem(NAME_KEY, name)
+        setFlowStage('goal')
+        const followUp: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: `Got it, ${name}. Who do you want to find, and what would make this connection useful?`
+        }
+        setMessages(prev => [...prev, followUp])
+      } catch {
         setError('Could not save your name. Try again.')
-        return
       }
-      setDisplayName(name)
-      localStorage.setItem(NAME_KEY, name)
-      await startChatAfterName(name)
       return
     }
 
     if (looksLikeLinkedin(clean)) {
       setLinkedinUrl(clean)
+      setFlowStage('ai_history')
       void extractLinkedin(clean)
     }
 
@@ -206,13 +256,20 @@ function App() {
           chatSessionId: activeSessionId,
           initialQuery: heroQuery,
           userName: displayName,
+          flowStage,
           messages: history.map(({ role, content, payload }) => ({ role, content, payload })),
         }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.message || 'Luminous got stuck.')
       if (data.chatSessionId) setChatSessionId(String(data.chatSessionId))
-      setMessages((current) => [...current, makeAssistant(data.message)])
+
+      const assistantMsg = makeAssistant(data.message)
+      setMessages((current) => [...current, assistantMsg])
+
+      if (data.message?.kind === 'upload_request') {
+        setFlowStage('ai_history')
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Something went wrong.')
     } finally {
@@ -228,36 +285,43 @@ function App() {
     })
     const data = await response.json().catch(() => ({}))
     if (response.ok && data.profile?.summary) {
-      setMessages((current) => [...current, makeAssistant({ kind: 'text', text: `${data.profile.summary} I’ll use that as context.` })])
+      const msg: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: `${data.profile.summary} I'll use that as context for the search.`
+      }
+      setMessages(current => [...current, msg])
     }
   }
 
   async function uploadHistory() {
     if (!importFile) {
-      setImportStatus('Choose a file first, or paste a prompt summary in the chat.')
+      setImportStatus('Choose a file first.')
       return
     }
     setImportStatus('Reading export...')
     const snippet = (await importFile.text()).slice(0, 8000)
-    const response = await fetch('/api/profile-import', {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        source: 'AI history export',
-        fileName: importFile.name,
-        contentSnippet: snippet,
-        initialQuery: heroQuery,
-        messages: messages.map(({ role, content }) => ({ role, content })),
-      }),
-    })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      setImportStatus(data.message || 'Could not import that file.')
-      return
+    try {
+      const response = await fetch('/api/profile-import', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          source: 'AI history export',
+          fileName: importFile.name,
+          contentSnippet: snippet,
+          initialQuery: heroQuery,
+          messages: messages.map(({ role, content }) => ({ role, content })),
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.message || 'Could not import that file.')
+      setGeneratedProfile(data.generatedProfile)
+      setImportStatus('Profile built. Starting search...')
+      setFlowStage('search')
+      await startConnection(data.generatedProfile)
+    } catch (caught) {
+      setImportStatus(caught instanceof Error ? caught.message : 'Could not import that file.')
     }
-    setGeneratedProfile(data.generatedProfile)
-    setImportStatus('Profile built from export. Starting private fit check...')
-    await startConnection(data.generatedProfile)
   }
 
   async function startConnection(profile = generatedProfile) {
@@ -273,13 +337,21 @@ function App() {
         }),
       })
       const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.message || 'Could not start search.')
+      if (!response.ok) {
+        if (response.status === 429) {
+          setError('You have used your 3 searches for this month. Come back next month for more.')
+        } else {
+          throw new Error(data.message || 'Could not start search.')
+        }
+        return
+      }
+      setSearchQuota(data.quota)
       setMessages((current) => [
         ...current,
         makeAssistant({
           kind: 'connection_started',
           title: 'Search complete',
-          text: 'I found a few possible candidates. Choose one person and I’ll queue outreach to see if they’re interested.',
+          text: 'I found a few possible candidates. Choose one person and I\'ll queue outreach to see if they\'re interested.',
           queuedEmails: Number(data.queuedEmails || 0),
           note: 'You can only choose one person for this search.',
           requestId: data.requestId,
@@ -324,28 +396,46 @@ function App() {
       ...current,
       makeAssistant({
         kind: 'text',
-        text: data.message || `I've queued outreach to ${candidate.name}. I'll let you know if they're interested.`,
+        text: `I've queued outreach to ${candidate.name}. I'll let you know if they're interested.`,
       }),
     ])
+  }
+
+  function getQuotaDisplay() {
+    if (!searchQuota) return null
+    const remaining = searchQuota.remaining
+    if (remaining === 0) {
+      return <span className="quota-badge empty"><span className="quota-dot" /> 0 searches left</span>
+    }
+    if (remaining === 1) {
+      return <span className="quota-badge warning"><span className="quota-dot" /> {remaining} search left</span>
+    }
+    return <span className="quota-badge"><span className="quota-dot" /> {remaining} searches left</span>
   }
 
   if (screen === 'landing') {
     return (
       <main className="app-shell">
         <section className="landing-view">
-          <div className="hero-copy">
-            <p className="eyebrow">Private mentor matching</p>
-            <h1>Who do you want to find?</h1>
-            <p>Luminous clarifies the goal, learns your context, then starts a private double opt-in search.</p>
+          <div className="landing-content">
+            <div className="landing-logo" />
+            <p className="landing-eyebrow">Private mentor matching</p>
+            <h1 className="landing-title">Find your next connection through people you trust.</h1>
+            <p className="landing-subtitle">
+              Luminous clarifies your goal, learns your context, then runs a private double opt-in search.
+            </p>
           </div>
-          <form className="hero-chat" onSubmit={handleHeroSubmit}>
-            <label htmlFor="hero-query">Search</label>
-            <div>
-              <input id="hero-query" value={heroQuery} onChange={(event) => setHeroQuery(event.target.value)} placeholder="A Paris hospitality operator who understands luxury real estate..." />
-              <button type="submit" disabled={!heroQuery.trim()}>
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M5 10H15M15 10L10 5M15 10L10 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+          <form className="landing-form" onSubmit={handleHeroSubmit}>
+            <div className="landing-input-wrapper">
+              <input
+                className="landing-input"
+                type="text"
+                value={heroQuery}
+                onChange={(e) => setHeroQuery(e.target.value)}
+                placeholder="A Paris hospitality operator who understands luxury real estate..."
+              />
+              <button type="submit" className="landing-submit" disabled={!heroQuery.trim()}>
+                Start
               </button>
             </div>
           </form>
@@ -358,21 +448,52 @@ function App() {
     return (
       <main className="app-shell">
         <section className="auth-view">
-          <form className="auth-panel" onSubmit={handleAuthSubmit}>
-            <p className="eyebrow">{authMode === 'signup' ? 'Create account' : 'Sign in'}</p>
-            <h1>Continue privately.</h1>
-            {heroQuery && <blockquote>{heroQuery}</blockquote>}
-            <label htmlFor="email">Email</label>
-            <input id="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
-            <label htmlFor="password">Password</label>
-            <input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
-            <div className="auth-mode">
-              <button type="button" className={authMode === 'signin' ? 'active' : ''} onClick={() => setAuthMode('signin')}>Sign in</button>
-              <button type="button" className={authMode === 'signup' ? 'active' : ''} onClick={() => setAuthMode('signup')}>Create</button>
-            </div>
-            <button type="submit">{authMode === 'signup' ? 'Create account' : 'Sign in'}</button>
-            {authError && <span className="form-error">{authError}</span>}
-          </form>
+          <div className="auth-card">
+            <h1 className="auth-header">{authMode === 'signup' ? 'Create account' : 'Sign in'}</h1>
+            <p className="auth-subtext">Continue privately with your search.</p>
+            <form className="auth-form" onSubmit={handleAuthSubmit}>
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="email">Email</label>
+                <input
+                  id="email"
+                  className="auth-input"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="password">Password</label>
+                <input
+                  id="password"
+                  className="auth-input"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+              <div className="auth-toggle">
+                <button
+                  type="button"
+                  className={authMode === 'signin' ? 'active' : ''}
+                  onClick={() => setAuthMode('signin')}
+                >
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  className={authMode === 'signup' ? 'active' : ''}
+                  onClick={() => setAuthMode('signup')}
+                >
+                  Create
+                </button>
+              </div>
+              <button type="submit" className="auth-submit">
+                {authMode === 'signup' ? 'Create account' : 'Sign in'}
+              </button>
+              {authError && <p className="auth-error">{authError}</p>}
+            </form>
+          </div>
         </section>
       </main>
     )
@@ -381,6 +502,12 @@ function App() {
   return (
     <main className="app-shell">
       <section className="chat-view">
+        <header className="chat-header">
+          <div className="chat-header-left">
+            <div className="chat-header-logo" />
+            {getQuotaDisplay()}
+          </div>
+        </header>
         <div className="chat-window">
           <div className="transcript" ref={transcriptRef}>
             {messages.map((message) => (
@@ -389,8 +516,8 @@ function App() {
                 message={message}
                 importFile={importFile}
                 setImportFile={setImportFile}
-                showHelp={showHelp}
-                setShowHelp={setShowHelp}
+                isDragover={isDragover}
+                setIsDragover={setIsDragover}
                 uploadHistory={uploadHistory}
                 startConnection={startConnection}
                 importStatus={importStatus}
@@ -398,15 +525,36 @@ function App() {
                 onChooseCandidate={chooseCandidate}
               />
             ))}
-            {isSending && <div className="message-row assistant"><div className="avatar"></div><div className="bubble typing"><span></span><span></span><span></span></div></div>}
+            {isSending && (
+              <div className="message-row assistant">
+                <div className="avatar" />
+                <div className="bubble typing">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+            )}
           </div>
           {error && <p className="error-banner">{error}</p>}
           <form className="composer" onSubmit={handleChatSubmit}>
             <div className="composer-inner">
-              <textarea value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendUserMessage(chatInput) } }} placeholder="Reply to Luminous..." rows={1} />
-              <button type="submit" disabled={!chatInput.trim() || isSending}>
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M10 15V5M10 5L5 10M10 5L15 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <textarea
+                className="composer-textarea"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    void sendUserMessage(chatInput)
+                  }
+                }}
+                placeholder="Reply to Luminous..."
+                rows={1}
+              />
+              <button type="submit" className="composer-send" disabled={!chatInput.trim() || isSending}>
+                <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M10 15V5M10 5L5 10M10 5L15 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
             </div>
@@ -421,8 +569,8 @@ function Message({
   message,
   importFile,
   setImportFile,
-  showHelp,
-  setShowHelp,
+  isDragover,
+  setIsDragover,
   uploadHistory,
   startConnection,
   importStatus,
@@ -432,32 +580,68 @@ function Message({
   message: ChatMessage
   importFile: File | null
   setImportFile: (file: File | null) => void
-  showHelp: boolean
-  setShowHelp: (value: boolean) => void
+  isDragover: boolean
+  setIsDragover: (value: boolean) => void
   uploadHistory: () => Promise<void>
   startConnection: () => Promise<void>
   importStatus: string
   selectedCandidateId: string
   onChooseCandidate: (requestId: string, candidate: Candidate) => Promise<void>
 }) {
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setIsDragover(true)
+  }
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setIsDragover(false)
+  }
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setIsDragover(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) setImportFile(file)
+  }
+
   return (
     <div className={`message-row ${message.role}`}>
-      {message.role === 'assistant' && <div className="avatar"></div>}
+      {message.role === 'assistant' && <div className="avatar" />}
       <div className="bubble">
         <p>{message.content}</p>
         {message.payload?.kind === 'upload_request' && (
           <div className="upload-card">
-            <div className="upload-actions">
-              <button type="button" className="secondary" onClick={() => setShowHelp(!showHelp)}>Context options</button>
-              <button type="button" className="secondary" onClick={() => void startConnection()}>Skip for now</button>
+            <h3 className="upload-title">Add context (optional)</h3>
+            <p className="upload-description">
+              The best results come from uploading a ChatGPT or Claude export. Otherwise, just click Continue.
+            </p>
+            <div className="upload-options">
+              <button type="button" className="upload-btn" onClick={() => void startConnection()}>
+                Continue without
+              </button>
             </div>
-            {showHelp && <aside className="help-popover"><strong>{message.payload.infoTitle}</strong><p>{message.payload.infoBody}</p></aside>}
-            <label className="file-pill" htmlFor="ai-history-file"><strong>{importFile?.name || 'Upload full export - best'}</strong><span>JSON, TXT, HTML, MD, or readable export snippet</span></label>
-            <input id="ai-history-file" type="file" accept=".json,.txt,.html,.md,.zip" onChange={(event) => setImportFile(event.target.files?.[0] || null)} />
-            <div className="upload-actions">
-              <button type="button" onClick={() => void uploadHistory()}>Attach export</button>
-              <button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText('Please summarize my goals, interests, projects, strengths, working style, and the kinds of mentors or professional connections I should meet. Make it specific enough for a matching system.')}>Copy summary prompt</button>
+            <div
+              className={`file-drop ${isDragover ? 'dragover' : ''}`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              <label className="file-drop-label">
+                {importFile ? importFile.name : 'Drop file or click to browse'}
+              </label>
+              <span className="file-drop-hint">JSON, TXT, HTML, MD export</span>
+              <input
+                type="file"
+                accept=".json,.txt,.html,.md,.zip"
+                onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+              />
             </div>
+            {importFile && (
+              <button type="button" className="upload-btn primary" onClick={() => void uploadHistory()}>
+                Process export
+              </button>
+            )}
             {importStatus && <span className="upload-status">{importStatus}</span>}
           </div>
         )}
@@ -484,41 +668,60 @@ function ConnectionPayloadView({
 }) {
   return (
     <div className="connection-card">
-      <strong>{payload.title}</strong>
-      <p>{payload.text}</p>
+      <h3 className="connection-header">{payload.title}</h3>
+      <p className="connection-subtext">{payload.text}</p>
+      <div className="outreach-flow">
+        <span className="outreach-step done">
+          <span className="outreach-step-indicator" />
+          Outgoing
+        </span>
+        <span className="outreach-step-arrow">→</span>
+        <span className={`outreach-step ${selectedCandidateId ? 'active' : ''}`}>
+          <span className="outreach-step-indicator" />
+          Interested
+        </span>
+        <span className="outreach-step-arrow">→</span>
+        <span className="outreach-step">
+          <span className="outreach-step-indicator" />
+          Warm intro
+        </span>
+      </div>
       {payload.candidates?.length ? (
-              <div className="candidate-list">
-                {payload.candidates.map((candidate) => {
-                  const isSelected = selectedCandidateId === candidate.id
-                  const locked = Boolean(selectedCandidateId && !isSelected)
-                  return (
-                    <article className={`candidate-card ${isSelected ? 'selected' : ''}`} key={candidate.id}>
-                      <div>
-                        <span className="label">{candidate.label}</span>
-                        <strong>{candidate.name}</strong>
-                        <small>{candidate.currentRole}</small>
-                      </div>
-                      <p>{candidate.reason}</p>
-                      <div className="candidate-actions">
-                        <a href={candidate.linkedinUrl} rel="noreferrer" target="_blank">
-                          Open LinkedIn
-                        </a>
-                        <button
-                          disabled={locked || isSelected || !payload.requestId}
-                          onClick={() => payload.requestId && void onChooseCandidate(payload.requestId, candidate)}
-                          type="button"
-                        >
-                          {isSelected ? 'Selected' : 'Choose this person'}
-                        </button>
-                      </div>
-                    </article>
-                  )
-                })}
-              </div>
-            ) : (
-              <span>{payload.queuedEmails} consent emails queued</span>
-            )}
-      <small>{payload.note}</small>
+        <div className="candidate-list">
+          {payload.candidates.map((candidate) => {
+            const isSelected = selectedCandidateId === candidate.id
+            const locked = Boolean(selectedCandidateId && !isSelected)
+            return (
+              <article className={`candidate-card ${isSelected ? 'selected' : ''}`} key={candidate.id}>
+                <div className="candidate-card-header">
+                  <div>
+                    <div className="candidate-name">{candidate.name}</div>
+                    <div className="candidate-role">{candidate.currentRole}</div>
+                  </div>
+                  <span className="candidate-label">{candidate.label}</span>
+                </div>
+                <p className="candidate-reason">{candidate.reason}</p>
+                <div className="candidate-actions">
+                  <a href={candidate.linkedinUrl} rel="noreferrer noopener" target="_blank" className="candidate-btn">
+                    LinkedIn
+                  </a>
+                  <button
+                    type="button"
+                    className={`candidate-btn primary ${isSelected ? '' : ''}`}
+                    disabled={locked || isSelected || !payload.requestId}
+                    onClick={() => payload.requestId && void onChooseCandidate(payload.requestId, candidate)}
+                  >
+                    {isSelected ? 'Selected' : 'Choose'}
+                  </button>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      ) : (
+        <span>{payload.queuedEmails} consent emails queued</span>
+      )}
+      <p className="connection-note">{payload.note}</p>
     </div>
   )
 }
@@ -533,7 +736,12 @@ function hydrateMessage(message: { role?: Role; content?: string; payload?: Assi
 }
 
 function makeAssistant(payload: AssistantPayload): ChatMessage {
-  return { id: crypto.randomUUID(), role: 'assistant', content: payload.kind === 'connection_started' ? payload.text : payload.text, payload }
+  return {
+    id: crypto.randomUUID(),
+    role: 'assistant',
+    content: payload.kind === 'connection_started' ? payload.text : payload.text,
+    payload,
+  }
 }
 
 function isValidEmail(value: string) {
@@ -541,7 +749,7 @@ function isValidEmail(value: string) {
 }
 
 function looksLikeLinkedin(text: string) {
-  return /linkedin\.com\/(in|pub)\//i.test(text) || /no linkedin/i.test(text)
+  return /linkedin\.com\/(in|pub)\//i.test(text) || /no linkedin|don't have|do not have|don't have a linkedin|do not have a linkedin/i.test(text)
 }
 
 export default App
