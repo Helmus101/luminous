@@ -342,7 +342,11 @@ function App() {
             <label htmlFor="hero-query">Search</label>
             <div>
               <input id="hero-query" value={heroQuery} onChange={(event) => setHeroQuery(event.target.value)} placeholder="A Paris hospitality operator who understands luxury real estate..." />
-              <button type="submit" disabled={!heroQuery.trim()}>-&gt;</button>
+              <button type="submit" disabled={!heroQuery.trim()}>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M5 10H15M15 10L10 5M15 10L10 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
             </div>
           </form>
         </section>
@@ -398,8 +402,14 @@ function App() {
           </div>
           {error && <p className="error-banner">{error}</p>}
           <form className="composer" onSubmit={handleChatSubmit}>
-            <textarea value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendUserMessage(chatInput) } }} placeholder="Reply to Luminous..." rows={1} />
-            <button type="submit" disabled={!chatInput.trim() || isSending}>Send</button>
+            <div className="composer-inner">
+              <textarea value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendUserMessage(chatInput) } }} placeholder="Reply to Luminous..." rows={1} />
+              <button type="submit" disabled={!chatInput.trim() || isSending}>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M10 15V5M10 5L5 10M10 5L15 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+            </div>
           </form>
         </div>
       </section>
@@ -438,7 +448,7 @@ function Message({
         {message.payload?.kind === 'upload_request' && (
           <div className="upload-card">
             <div className="upload-actions">
-              <button type="button" onClick={() => setShowHelp(!showHelp)}>Context options</button>
+              <button type="button" className="secondary" onClick={() => setShowHelp(!showHelp)}>Context options</button>
               <button type="button" className="secondary" onClick={() => void startConnection()}>Skip for now</button>
             </div>
             {showHelp && <aside className="help-popover"><strong>{message.payload.infoTitle}</strong><p>{message.payload.infoBody}</p></aside>}
@@ -484,7 +494,7 @@ function ConnectionPayloadView({
                   return (
                     <article className={`candidate-card ${isSelected ? 'selected' : ''}`} key={candidate.id}>
                       <div>
-                        <span>{candidate.label}</span>
+                        <span className="label">{candidate.label}</span>
                         <strong>{candidate.name}</strong>
                         <small>{candidate.currentRole}</small>
                       </div>
