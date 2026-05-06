@@ -19,6 +19,7 @@ import {
   signInWithPassword,
   signUpWithPassword,
   updateUserName,
+  deleteAllChatHistory,
 } from './repositories/supabaseRepository.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -115,6 +116,18 @@ app.get('/api/chat/latest', async (req, res) => {
 
   const chat = await getLatestChat({ email: authUser.email, authUserId: authUser.id })
   res.json({ chat })
+})
+
+app.delete('/api/chat/all', async (req, res) => {
+  const authUser = await requireAuth(req, res)
+  if (!authUser) return
+
+  try {
+    await deleteAllChatHistory(authUser.email)
+    res.json({ message: 'Chat history deleted.' })
+  } catch (error) {
+    res.status(500).json({ message: 'Could not delete chat history.' })
+  }
 })
 
 app.post('/api/chat', async (req, res) => {
@@ -352,8 +365,8 @@ async function getAssistantPayload({ messages, userName, flowStage, initialQuery
 
 /**
  * Anthropomorphic flow system prompt
- * Follows strict sequence: Name -> Goal -> Specifics -> LinkedIn (mandatory) -> AI History (mandatory) -> Search
- * LinkedIn and AI History are both required steps - users cannot skip AI History
+ * Follows strict sequence: Name -> Goal -> LinkedIn (mandatory) -> AI History (mandatory) -> Search
+ * LinkedIn and AI History are both absolutely required steps
  */
 function buildSystemPrompt(userName, flowStage) {
   const name = userName || 'there'
@@ -366,15 +379,14 @@ Return JSON only:
 STRICT SEQUENCE (mandatory):
 1. NAME: Ask for the user's name if unknown. Use it to personalize.
 2. GOAL: Ask "Who do you want to find, ${name}, and what would make this connection useful?"
-3. SPECIFICS: Ask ONE clarifying question about the ideal person (role, industry, background, location, or key constraint).
-4. LINKEDIN: Ask for their LinkedIn profile URL. Accept "no LinkedIn" as valid input, but do not skip this step.
-5. AI HISTORY (REQUIRED): After LinkedIn, present the upload_request with instructions to copy the Master Prompt and paste a structured summary from ChatGPT/Claude. This step is MANDATORY - do not offer to skip it.
-6. SEARCH: Automatically triggered after AI History is processed.
+3. LINKEDIN (REQUIRED): Ask for their LinkedIn profile URL. This is mandatory. Do not accept "skip" or "no LinkedIn".
+4. AI HISTORY (REQUIRED): After LinkedIn is provided, present the upload_request with instructions to copy the Master Prompt and paste a structured summary from ChatGPT/Claude. This step is MANDATORY.
+5. SEARCH: Automatically triggered after AI History is processed.
 
 IMPORTANT RULES:
-- LinkedIn is required but can be "no LinkedIn"
-- AI History is REQUIRED - do not say "continue without" or offer to skip
-- Do not move to search until the AI History step is handled
+- LinkedIn is MANDATORY. Do not move forward without a valid LinkedIn URL.
+- AI History is MANDATORY. Do not offer to skip it.
+- Do not move to search until both LinkedIn and AI History are handled.
 - Address the user as ${name}
 
 STYLE:
@@ -396,26 +408,17 @@ function buildConversationForDeepSeek(messages, flowStage, initialQuery) {
   if (flowStage === 'name' && userMessages.length === 0) {
     systemContext.push({ role: 'system', content: 'STAGE: Name - Ask for their name first.' })
   } else if (flowStage === 'goal') {
-    systemContext.push({ role: 'system', content: 'STAGE: Goal - User has shared their initial goal. Ask clarifying question about the person they want to find.' })
-  } else if (flowStage === 'specifics') {
-    systemContext.push({ role: 'system', content: 'STAGE: Specifics - Ask for more detail about the ideal mentor: role, industry, location, background, or key constraint.' })
+    systemContext.push({ role: 'system', content: 'STAGE: Goal - User has shared their initial goal.' })
   } else if (flowStage === 'linkedin') {
-    systemContext.push({ role: 'system', content: 'STAGE: LinkedIn - Ask if they have a LinkedIn profile. Accept "no LinkedIn" as a valid answer.' })
+    systemContext.push({ role: 'system', content: 'STAGE: LinkedIn (MANDATORY) - Ask for their LinkedIn profile URL. Must be a valid URL.' })
   } else if (flowStage === 'ai_history') {
-    systemContext.push({ role: 'system', content: 'STAGE: AI History (MANDATORY) - User has completed LinkedIn. Now present upload_request for AI History export. Do NOT mention "continue without" - this step is required.' })
+    systemContext.push({ role: 'system', content: 'STAGE: AI History (MANDATORY) - User has provided LinkedIn. Now present upload_request for AI History export. This step is required.' })
   }
 
   const conversation = messages.slice(-12).map(m => ({
     role: m.role,
     content: m.content,
   }))
-
-  if (initialQuery && userMessages.length <= 1) {
-    return [
-      ...systemContext,
-      ...conversation,
-    ]
-  }
 
   return [
     ...systemContext,
@@ -430,7 +433,7 @@ function buildConversationForDeepSeek(messages, flowStage, initialQuery) {
 function buildDeterministicChatResponse(messages, userName, flowStage) {
   const userMessages = messages.filter((message) => message.role === 'user')
   const combined = messages.map((message) => message.content).join(' ').toLowerCase()
-  const hasLinkedin = /linkedin\.com\/in\/|linkedin\.com\/pub\/|no linkedin|don't have|do not have|don't have a linkedin|do not have a linkedin/i.test(combined)
+  const hasLinkedin = looksLikeLinkedinUrl(userMessages[userMessages.length - 1]?.content || '')
   const hasContext = /(upload|export|attached|chatgpt|claude|ai history)/i.test(combined)
 
   if (flowStage === 'ai_history' || hasLinkedin) {
@@ -448,14 +451,7 @@ function buildDeterministicChatResponse(messages, userName, flowStage) {
   if (flowStage === 'linkedin') {
     return {
       kind: 'text',
-      text: `Got it. Do you have a LinkedIn profile? If yes, paste the URL. If not, just say so.`,
-    }
-  }
-
-  if (flowStage === 'specifics') {
-    return {
-      kind: 'text',
-      text: `Thanks. To help me find the best match, could you tell me a bit more about the ideal person's background or the specific industry expertise you're looking for?`,
+      text: `Got it. Please provide your LinkedIn profile URL so I can understand your background better.`,
     }
   }
 
@@ -885,7 +881,7 @@ function sanitizePassword(input) {
 }
 
 function looksLikeLinkedinUrl(value) {
-  return /^https?:\/\/(www\.)?linkedin\.com\/(in|pub)\/[a-z0-9%_-]+\/?/i.test(value)
+  return /^https?:\/\/(www\.)?linkedin\.com\/(in|pub)\/[a-z0-9%_-]+\/?/i.test(String(value || '').trim())
 }
 
 function humanizeAuthError(error, fallback) {
