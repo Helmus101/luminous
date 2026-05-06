@@ -14,17 +14,17 @@
   --bg: #ffffff;
   --soft: #f9fafb;
   
-  /* iMessage Bubble Colors */
-  --bubble-user: #000000;
+  /* iMessage Bubble Colors - Professional Zinc/Slate */
+  --bubble-user: #18181b; /* zinc-900 */
   --bubble-user-text: #ffffff;
-  --bubble-assistant: #f1f1f2;
-  --bubble-assistant-text: #000000;
-  --bubble-radius: 20px;
+  --bubble-assistant: #f4f4f5; /* zinc-100 */
+  --bubble-assistant-text: #18181b;
+  --bubble-radius: 18px;
   --bubble-radius-pointed: 4px;
   
   /* Subtle accent for interactive elements */
-  --accent: #4b5563;
-  --accent-hover: #374151;
+  --accent: #27272a; /* zinc-800 */
+  --accent-hover: #18181b;
   
   /* Premium timing */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -205,19 +205,18 @@ button:disabled {
 
 .landing-signin {
   padding: 10px 20px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border: none;
   background: transparent;
   color: var(--muted);
   font-size: 14px;
   font-weight: 500;
   transition: all 0.2s var(--ease-out);
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
 .landing-signin:hover {
-  border-color: var(--muted);
   color: var(--ink);
-  background: var(--soft);
 }
 
 /* ============================================
@@ -654,7 +653,8 @@ button:disabled {
   border-color: #16a34a;
 }
 
-.required-badge {
+.required-badge,
+.optional-badge {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 10px;
@@ -666,6 +666,11 @@ button:disabled {
   letter-spacing: 0.04em;
   vertical-align: middle;
   margin-left: 8px;
+}
+
+.optional-badge {
+  background: #f4f4f5;
+  color: #71717a;
 }
 
 .paste-section {
