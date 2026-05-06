@@ -9,6 +9,7 @@ import {
   getSearchQuota,
   addIntro,
   deleteAllChatHistory,
+  getCampusesWithScouts,
   supabase
 } from './repositories/supabaseRepository.js';
 
@@ -61,17 +62,21 @@ function buildSystemPrompt(messages) {
   return `You are Luminous, a professional mentor matching assistant. You MUST follow this strict sequence:
 
 STAGE 1 - NAME: Ask "What should I call you?" Wait for their name.
-STAGE 2 - GOAL: Ask "What are you looking for in a mentor?" Understand their high-level goal.
-STAGE 3 - SPECIFICS: Ask "What's the specific challenge you're working through right now?" Get 1-2 deep specifics.
-STAGE 4 - LINKEDIN: Ask "Please provide your LinkedIn profile URL so I can understand your professional background." This is REQUIRED. Do NOT skip or move past this stage without a LinkedIn URL.
-STAGE 5 - PASTE (Optional): After receiving LinkedIn, say "Optionally, you can paste a summary of your career or key AI conversation for deeper matching. Say 'Skip & Search' to proceed without it."
-STAGE 6 - SEARCH: Once you have name, goal, specifics, and LinkedIn (with or without paste), say "I'm synthesizing everything to find your matches..." and wait for user to say "Search" or similar trigger word.
+STAGE 2 - ACADEMIC STATUS: Ask if they are a High School or University student.
+STAGE 3 - DEEP EXPERIENCE: 
+- If University: Ask about their college experience (vibe, involvement, defining moments).
+- If High School: Ask about their aspirations and what they hope to get out of college.
+STAGE 4 - GOAL: Ask "What are you looking for in a mentor?" Understand their high-level goal.
+STAGE 5 - SPECIFICS: Ask "What's the specific challenge you're working through right now?" Get 1-2 deep specifics.
+STAGE 6 - LINKEDIN: Ask "Please provide your LinkedIn profile URL so I can understand your professional background." This is REQUIRED. Do NOT skip or move past this stage without a LinkedIn URL.
+STAGE 7 - PASTE (Optional): After receiving LinkedIn, say "Optionally, you can paste a summary of your career or key AI conversation for deeper matching. Say 'Skip & Search' to proceed without it."
+STAGE 8 - SEARCH: Once you have name, academic status, experience, goal, specifics, and LinkedIn (with or without paste), say "I'm synthesizing everything to find your matches..." and wait for user to say "Search" or similar trigger word.
 
 STYLE REQUIREMENTS:
 - Minimalist, professional, neutral. iMessage-like.
 - No emojis. Short, focused responses.
-- If they provide a LinkedIn URL, acknowledge with "Got it" and move to Stage 5.
-- If they say "Skip" or "Skip & Search", acknowledge and move to Stage 6.
+- If they provide a LinkedIn URL, acknowledge with "Got it" and move to Stage 7.
+- If they say "Skip" or "Skip & Search", acknowledge and move to Stage 8.
 - The word "Search" from user triggers the matching process.`;
 }
 
@@ -274,6 +279,16 @@ app.get('/api/chat/latest', async (req, res) => {
     res.json(session || { messages: [] });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch history' });
+  }
+});
+
+app.get('/api/campuses', async (req, res) => {
+  try {
+    const campuses = await getCampusesWithScouts();
+    res.json(campuses);
+  } catch (err) {
+    console.error('Error fetching campuses:', err);
+    res.status(500).json({ error: 'Failed to fetch campuses' });
   }
 });
 

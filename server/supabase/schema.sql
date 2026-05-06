@@ -142,3 +142,17 @@ create index if not exists chat_sessions_auth_user_updated_idx on public.chat_se
 create index if not exists chat_messages_session_index_idx on public.chat_messages(session_id, message_index);
 create index if not exists match_requests_selected_candidate_idx on public.match_requests(selected_candidate_id);
 create index if not exists consent_emails_stage_idx on public.consent_emails(email_stage);
+
+-- Campus Canvas Addition
+create table if not exists public.campuses (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  slug text not null unique,
+  vibe text,
+  insider_hooks jsonb not null default '[]'::jsonb,
+  location text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.people add column if not exists campus_id uuid references public.campuses(id) on delete set null;
+create index if not exists people_campus_id_idx on public.people(campus_id);

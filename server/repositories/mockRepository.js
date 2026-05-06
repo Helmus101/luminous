@@ -306,6 +306,51 @@ export function recordConsentDecision({ emailId, decision }) {
   }
 }
 
+const mockCampuses = [
+  {
+    id: 'c1',
+    name: 'University of Oxford',
+    slug: 'oxford',
+    vibe: 'Historic, collegiate, and steeped in tradition.',
+    insider_hooks: ['College system', 'Tutorials', 'The Bodleian'],
+    location: 'Oxford, UK'
+  },
+  {
+    id: 'c2',
+    name: 'London School of Economics',
+    slug: 'lse',
+    vibe: 'Urban, ambitious, and globally focused.',
+    insider_hooks: ['Holborn networking', 'Public lectures', 'Career focus'],
+    location: 'London, UK'
+  },
+  {
+    id: 'c3',
+    name: 'HEC Paris',
+    slug: 'hec-paris',
+    vibe: 'Elite, entrepreneurial, and deeply networked.',
+    insider_hooks: ['Jouy-en-Josas campus', 'Grandes Écoles network', 'Finance & Luxury focus'],
+    location: 'Paris, France'
+  }
+]
+
+export function getCampusesWithScouts() {
+  return mockCampuses.map((campus) => ({
+    ...campus,
+    scouts: mentors
+      .filter(
+        (m) =>
+          m.background?.toLowerCase().includes(campus.name.toLowerCase()) ||
+          m.background?.toLowerCase().includes(campus.slug.toLowerCase()),
+      )
+      .map((m) => ({
+        id: m.id,
+        name: m.name,
+        current_role_text: m.currentRole,
+        campus_id: campus.id,
+      })),
+  }))
+}
+
 export function getRepositorySnapshot() {
   return {
     emailOnboardings: emailOnboardings.length,
