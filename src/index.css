@@ -1,37 +1,25 @@
 :root {
-  /* Slate & Indigo Palette */
-  --slate-50: #f8fafc;
-  --slate-100: #f1f5f9;
-  --slate-200: #e2e8f0;
-  --slate-300: #cbd5e1;
-  --slate-400: #94a3b8;
-  --slate-500: #64748b;
-  --slate-600: #475569;
-  --slate-700: #334155;
-  --slate-800: #1e293b;
-  --slate-900: #0f172a;
-  --slate-950: #020617;
+  /* Zinc Palette */
+  --zinc-50: #fafafa;
+  --zinc-100: #f4f4f5;
+  --zinc-200: #e4e4e7;
+  --zinc-300: #d4d4d8;
+  --zinc-400: #a1a1aa;
+  --zinc-500: #71717a;
+  --zinc-600: #52525b;
+  --zinc-700: #3f3f46;
+  --zinc-800: #27272a;
+  --zinc-900: #18181b;
+  --zinc-950: #09090b;
 
-  --indigo-50: #eef2ff;
-  --indigo-100: #e0e7ff;
-  --indigo-200: #c7d2fe;
-  --indigo-300: #a5b4fc;
-  --indigo-400: #818cf8;
-  --indigo-500: #6366f1;
-  --indigo-600: #4f46e5;
-  --indigo-700: #4338ca;
-  --indigo-800: #3730a3;
-  --indigo-900: #312e81;
-  --indigo-950: #1e1b4b;
-
-  --text: var(--slate-700);
-  --text-h: var(--slate-900);
-  --muted: var(--slate-500);
+  --text: var(--zinc-700);
+  --text-h: var(--zinc-950);
+  --muted: var(--zinc-500);
   --bg: #ffffff;
-  --soft: var(--slate-50);
-  --border: var(--slate-200);
-  --accent: var(--indigo-600);
-  --accent-dark: var(--indigo-700);
+  --soft: var(--zinc-50);
+  --border: var(--zinc-200);
+  --accent: var(--zinc-900);
+  --accent-dark: var(--zinc-950);
   
   --sans: 'Geist Sans', 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --mono: 'Geist Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
