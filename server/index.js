@@ -11,6 +11,7 @@ import {
   getNetworkPeople,
   getRepositorySnapshot,
   getSearchQuota,
+  getSupabaseClient,
   getUserByAccessToken,
   recordConsentDecision,
   saveChatTranscript,
@@ -252,10 +253,68 @@ app.post('/api/match-requests/:requestId/select-candidate', async (req, res) => 
   }
 
   try {
+    // Optionally use DeepSeek to craft a professional outreach message
+    let customBody = null
+    let customSubject = null
+
+    const apiKey = process.env.DEEPSEEK_API_KEY
+    if (apiKey) {
+      try {
+        const { data: people } = await getSupabaseClient().from('people').select('*')
+        const { data: candidates } = await getSupabaseClient().from('match_candidates').select('*, people(*)').eq('id', candidateId).single()
+        const { data: request } = await getSupabaseClient().from('match_requests').select('*').eq('id', requestId).single()
+
+        if (candidates && request) {
+          const person = candidates.people
+          const prompt = `You are Luminous, a professional matching agent. Craft a high-fidelity, minimalist, and professional double opt-in outreach email from Luminous to a potential mentor.
+
+MENTOR: ${person.name}, ${person.current_role_text}
+REASON FOR MATCH: ${candidates.reason}
+REQUESTER: ${authUser.email}
+REQUESTER LINKEDIN: ${request.linkedin_url}
+
+The email should be from Luminous, explaining why this match was made and asking for consent to introduce them. Keep it professional, neutral, and concise.
+
+Return JSON:
+{
+  "subject": "Email subject",
+  "body": "Email body"
+}`
+          const response = await fetch('https://api.deepseek.com/chat/completions', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
+              temperature: 0.7,
+              response_format: { type: 'json_object' },
+              messages: [{ role: 'user', content: prompt }],
+            }),
+          })
+
+          if (response.ok) {
+            const data = await response.json()
+            const content = data?.choices?.[0]?.message?.content
+            if (content) {
+              const parsed = JSON.parse(content)
+              customSubject = parsed.subject
+              customBody = parsed.body
+            }
+          }
+        }
+      } catch (err) {
+        console.error('DeepSeek outreach generation failed:', err)
+      }
+    }
+
     const selection = await selectCandidateForRequest({
       email: authUser.email,
       requestId,
       candidateId,
+      customBody,
+      customSubject,
     })
     res.status(201).json({
       status: 'candidate_contacted',
@@ -365,8 +424,8 @@ async function getAssistantPayload({ messages, userName, flowStage, initialQuery
 
 /**
  * Anthropomorphic flow system prompt
- * Follows strict sequence: Name -> Goal -> LinkedIn (mandatory) -> AI History (mandatory) -> Search
- * LinkedIn and AI History are both absolutely required steps
+ * Follows strict sequence: Name -> Goal -> LinkedIn (mandatory) -> AI History (optional) -> Search
+ * LinkedIn is absolutely required, AI History is highly recommended but can be skipped.
  */
 function buildSystemPrompt(userName, flowStage) {
   const name = userName || 'there'
@@ -380,13 +439,12 @@ STRICT SEQUENCE (mandatory):
 1. NAME: Ask for the user's name if unknown. Use it to personalize.
 2. GOAL: Ask "Who do you want to find, ${name}, and what would make this connection useful?"
 3. LINKEDIN (REQUIRED): Ask for their LinkedIn profile URL. This is mandatory. Do not accept "skip" or "no LinkedIn".
-4. AI HISTORY (REQUIRED): After LinkedIn is provided, present the upload_request with instructions to copy the Master Prompt and paste a structured summary from ChatGPT/Claude. This step is MANDATORY.
-5. SEARCH: Automatically triggered after AI History is processed.
+4. AI HISTORY (OPTIONAL): After LinkedIn is provided, present the upload_request with instructions to copy the Master Prompt and paste a structured summary from ChatGPT/Claude. This step is optional but highly recommended.
+5. SEARCH: Triggered after AI History is provided OR if the user chooses to skip.
 
 IMPORTANT RULES:
 - LinkedIn is MANDATORY. Do not move forward without a valid LinkedIn URL.
-- AI History is MANDATORY. Do not offer to skip it.
-- Do not move to search until both LinkedIn and AI History are handled.
+- AI History is OPTIONAL. If the user wants to skip, they can.
 - Address the user as ${name}
 
 STYLE:
@@ -412,7 +470,7 @@ function buildConversationForDeepSeek(messages, flowStage, initialQuery) {
   } else if (flowStage === 'linkedin') {
     systemContext.push({ role: 'system', content: 'STAGE: LinkedIn (MANDATORY) - Ask for their LinkedIn profile URL. Must be a valid URL.' })
   } else if (flowStage === 'ai_history') {
-    systemContext.push({ role: 'system', content: 'STAGE: AI History (MANDATORY) - User has provided LinkedIn. Now present upload_request for AI History export. This step is required.' })
+    systemContext.push({ role: 'system', content: 'STAGE: AI History (OPTIONAL) - User has provided LinkedIn. Now present upload_request for AI History export. This step is recommended but can be skipped.' })
   }
 
   const conversation = messages.slice(-12).map(m => ({
@@ -428,13 +486,13 @@ function buildConversationForDeepSeek(messages, flowStage, initialQuery) {
 
 /**
  * Deterministic fallback - follows the same flow structure
- * LinkedIn and AI History are both required steps
+ * LinkedIn is mandatory, AI History is optional
  */
 function buildDeterministicChatResponse(messages, userName, flowStage) {
   const userMessages = messages.filter((message) => message.role === 'user')
   const combined = messages.map((message) => message.content).join(' ').toLowerCase()
   const hasLinkedin = looksLikeLinkedinUrl(userMessages[userMessages.length - 1]?.content || '')
-  const hasContext = /(upload|export|attached|chatgpt|claude|ai history)/i.test(combined)
+  const hasContext = /(upload|export|attached|chatgpt|claude|ai history|master prompt)/i.test(combined)
 
   if (flowStage === 'ai_history' || hasLinkedin) {
     if (hasContext) {
@@ -442,16 +500,16 @@ function buildDeterministicChatResponse(messages, userName, flowStage) {
     }
     return {
       kind: 'upload_request',
-      text: 'To get the best matching results, use the "Copy Master Prompt" button below, paste it into ChatGPT or Claude, and paste the structured summary result here. You can also drop a JSON, TXT, or HTML export file from ChatGPT or Claude.',
-      infoTitle: 'Add context (required)',
-      infoBody: 'This step is required for matching. Use the Master Prompt to generate a high-signal professional summary for our matching engine.',
+      text: 'To get the best matching results, use the "Copy Master Prompt" button below, paste it into ChatGPT or Claude, and paste the structured summary result here. This is optional but highly recommended.',
+      infoTitle: 'Add context (optional)',
+      infoBody: 'This step is optional but provides high-signal professional context for our matching engine.',
     }
   }
 
   if (flowStage === 'linkedin') {
     return {
       kind: 'text',
-      text: `Got it. Please provide your LinkedIn profile URL so I can understand your background better.`,
+      text: `Got it. Please provide your LinkedIn profile URL so I can understand your background better. This is required for matching.`,
     }
   }
 
@@ -805,14 +863,23 @@ function pickSignals(text, signals) {
 
 function buildMockLinkedinProfile(linkedinUrl) {
   const slug = decodeURIComponent(linkedinUrl.split('/').filter(Boolean).pop() || 'profile').replace(/-/g, ' ')
+  const name = slug.replace(/\b\w/g, (char) => char.toUpperCase())
+  const signals = pickSignals(linkedinUrl.toLowerCase(), ['hospitality', 'real estate', 'startup', 'ai', 'finance', 'paris', 'london', 'product', 'design', 'engineering'])
+  
+  let summary = `I've analyzed the LinkedIn profile for ${name}. `
+  if (signals.length > 0) {
+    summary += `They appear to have experience in ${signals.join(', ')}. `
+  }
+  summary += `I'll use this background to find the most relevant mentors.`
+
   return {
-    name: slug.replace(/\b\w/g, (char) => char.toUpperCase()),
-    headline: 'LinkedIn Profile',
-    location: '',
-    signals: pickSignals(linkedinUrl.toLowerCase(), ['hospitality', 'real estate', 'startup', 'ai', 'finance', 'paris', 'london']),
-    summary: `I read that LinkedIn URL and will use it as context for the search.`,
+    name,
+    headline: `${name} | Professional Profile`,
+    location: signals.includes('paris') ? 'Paris, France' : signals.includes('london') ? 'London, UK' : 'Global',
+    signals,
+    summary,
     sourceUrl: linkedinUrl,
-    confidence: 'light',
+    confidence: 'medium',
   }
 }
 

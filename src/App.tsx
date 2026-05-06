@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
 
@@ -117,8 +117,6 @@ function App() {
   const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [chatSessionId, setChatSessionId] = useState('')
-  const [importFile, setImportFile] = useState<File | null>(null)
-  const [isDragover, setIsDragover] = useState(false)
   const [importStatus, setImportStatus] = useState('')
   const [pastedHistory, setPastedHistory] = useState('')
   const [generatedProfile, setGeneratedProfile] = useState<unknown>(null)
@@ -209,14 +207,19 @@ function App() {
   }
 
   function detectFlowStage(msgs: ChatMessage[]) {
-    const combined = msgs.map(m => m.content).join(' ').toLowerCase()
-    const hasLinkedin = /linkedin\.com|linkedin profile/i.test(combined)
-    const hasAiHistory = /upload|export|attached|chatgpt|claude|master prompt|context.*export/i.test(combined)
+    const assistantMessages = msgs.filter(m => m.role === 'assistant')
+    const lastAssistantMessage = assistantMessages[assistantMessages.length - 1]?.content.toLowerCase() || ''
     
-    if (hasAiHistory) {
+    if (lastAssistantMessage.includes('choose one person for this search') || lastAssistantMessage.includes('search complete')) {
+      setFlowStage('search')
+    } else if (lastAssistantMessage.includes('master prompt') || lastAssistantMessage.includes('add context')) {
       setFlowStage('ai_history')
-    } else if (hasLinkedin) {
+    } else if (lastAssistantMessage.includes('linkedin profile url')) {
       setFlowStage('linkedin')
+    } else if (lastAssistantMessage.includes('who do you want to find')) {
+      setFlowStage('goal')
+    } else {
+      setFlowStage('name')
     }
   }
 
@@ -282,6 +285,8 @@ function App() {
       setEmail('')
       setDisplayName('')
       setScreen('landing')
+      // Refresh to ensure clean state
+      window.location.reload()
       return
     }
 
@@ -301,7 +306,7 @@ function App() {
       try {
         const response = await fetch('/api/user-profile', {
           method: 'PATCH',
-          headers: authHeaders(),
+          headers: authHeaders(activeToken),
           body: JSON.stringify({ fullName: clean }),
         })
         if (!response.ok) throw new Error('Could not save your name.')
@@ -325,7 +330,7 @@ function App() {
       const followUp: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: 'I see. Please provide your LinkedIn profile URL so I can understand your background better.'
+        content: 'I see. Please provide your LinkedIn profile URL so I can understand your background better. This is required for matching.'
       }
       setMessages(prev => [...prev, followUp])
       return
@@ -333,6 +338,8 @@ function App() {
       setLinkedinUrl(clean)
       setFlowStage('ai_history')
       void extractLinkedin(clean)
+      // We will wait for extractLinkedin to finish and it will send its own message
+      // and requestChat will then be called or triggered by the assistant's next move.
     } else if (flowStage === 'linkedin') {
       // Mandatory LinkedIn check
       const errorMsg: ChatMessage = {
@@ -341,6 +348,12 @@ function App() {
         content: 'LinkedIn is required to proceed. Please provide a valid LinkedIn URL (e.g., https://linkedin.com/in/yourname).'
       }
       setMessages(prev => [...prev, errorMsg])
+      return
+    }
+
+    if (flowStage === 'ai_history') {
+      // If they are in ai_history stage and they paste something, we process it
+      void uploadHistory(clean)
       return
     }
 
@@ -393,16 +406,17 @@ function App() {
         content: `${data.profile.summary} I'll use that as context for the search.`
       }
       setMessages(current => [...current, msg])
+      
+      // After LinkedIn is extracted, trigger the AI History request
+      await requestChat([...messages, { id: crypto.randomUUID(), role: 'user', content: url }, msg])
     }
   }
 
   async function uploadHistory(textToProcess?: string) {
-    const fileContent = importFile ? (await importFile.text()).slice(0, 8000) : ''
-    const pastedContent = textToProcess || pastedHistory
-    const contentToProcess = pastedContent || fileContent
+    const contentToProcess = textToProcess || pastedHistory
     
     if (!contentToProcess.trim()) {
-      setImportStatus('Paste your AI summary or drop a file first.')
+      setImportStatus('Paste your AI summary first.')
       return
     }
     
@@ -412,8 +426,8 @@ function App() {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
-          source: importFile ? 'AI history export' : 'Pasted AI summary',
-          fileName: importFile?.name || 'pasted summary',
+          source: 'Pasted AI summary',
+          fileName: 'pasted summary',
           contentSnippet: contentToProcess.slice(0, 8000),
           initialQuery: heroQuery,
           messages: messages.map(({ role, content }) => ({ role, content })),
@@ -432,6 +446,7 @@ function App() {
 
   async function startConnection(profile = generatedProfile) {
     setIsSending(true)
+    setFlowStage('search')
     try {
       const response = await fetch('/api/connection-request', {
         method: 'POST',
@@ -553,7 +568,7 @@ function App() {
                   setAuthMode('signin')
                 }}
               >
-                Sign in
+                Already have an account? Sign in
               </button>
             </div>
           </form>
@@ -632,10 +647,7 @@ function App() {
               <Message
                 key={message.id}
                 message={message}
-                importFile={importFile}
-                setImportFile={setImportFile}
-                isDragover={isDragover}
-                setIsDragover={setIsDragover}
+                startConnection={startConnection}
                 uploadHistory={uploadHistory}
                 importStatus={importStatus}
                 selectedCandidateId={selectedCandidateId}
@@ -686,10 +698,7 @@ function App() {
 
 function Message({
   message,
-  importFile,
-  setImportFile,
-  isDragover,
-  setIsDragover,
+  startConnection,
   uploadHistory,
   importStatus,
   selectedCandidateId,
@@ -698,10 +707,7 @@ function Message({
   setPastedHistory,
 }: {
   message: ChatMessage
-  importFile: File | null
-  setImportFile: (file: File | null) => void
-  isDragover: boolean
-  setIsDragover: (value: boolean) => void
+  startConnection: () => Promise<void>
   uploadHistory: (text?: string) => Promise<void>
   importStatus: string
   selectedCandidateId: string
@@ -709,23 +715,6 @@ function Message({
   pastedHistory: string
   setPastedHistory: (text: string) => void
 }) {
-  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    setIsDragover(true)
-  }
-
-  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    setIsDragover(false)
-  }
-
-  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    setIsDragover(false)
-    const file = e.dataTransfer.files?.[0]
-    if (file) setImportFile(file)
-  }
-
   return (
     <div className={`message-row ${message.role}`}>
       {message.role === 'assistant' && <div className="avatar" />}
@@ -733,9 +722,9 @@ function Message({
         <p>{message.content}</p>
         {message.payload?.kind === 'upload_request' && (
           <div className="upload-card">
-            <h3 className="upload-title">Add context <span className="required-badge">Required</span></h3>
+            <h3 className="upload-title">Add context <span className="optional-badge">Optional</span></h3>
             <p className="upload-description">
-              This step is required for matching. Use the Master Prompt below to generate a structured summary in ChatGPT or Claude, then paste the result here.
+              This step is highly recommended for higher-fidelity matching. Use the Master Prompt below to generate a structured summary in ChatGPT or Claude, then paste the result here.
             </p>
             <div className="upload-options">
               <button
@@ -747,6 +736,13 @@ function Message({
                 }}
               >
                 Copy Master Prompt
+              </button>
+              <button
+                type="button"
+                className="upload-btn"
+                onClick={() => void startConnection()}
+              >
+                Skip &amp; Search
               </button>
             </div>
             <div className="paste-section">
@@ -762,26 +758,7 @@ function Message({
                 rows={6}
               />
             </div>
-            <div className="upload-divider">
-              <span>or</span>
-            </div>
-            <div
-              className={`file-drop ${isDragover ? 'dragover' : ''}`}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <label className="file-drop-label">
-                {importFile ? importFile.name : 'Drop an export file'}
-              </label>
-              <span className="file-drop-hint">JSON, TXT, HTML, MD export from ChatGPT or Claude</span>
-              <input
-                type="file"
-                accept=".json,.txt,.html,.md,.zip"
-                onChange={(e) => setImportFile(e.target.files?.[0] || null)}
-              />
-            </div>
-            {(pastedHistory.trim() || importFile) && (
+            {pastedHistory.trim() && (
               <button 
                 type="button" 
                 className="upload-btn primary process-btn" 

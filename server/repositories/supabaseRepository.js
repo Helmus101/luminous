@@ -432,7 +432,7 @@ export async function createConnectionRequest({ email, linkedinUrl, generatedPro
   }
 }
 
-export async function selectCandidateForRequest({ email, requestId, candidateId }) {
+export async function selectCandidateForRequest({ email, requestId, candidateId, customBody, customSubject }) {
   const supabase = getSupabaseClient()
   const { data: request, error: requestError } = await supabase
     .from('match_requests')
@@ -483,13 +483,14 @@ export async function selectCandidateForRequest({ email, requestId, candidateId 
     candidateId,
     recipientType: 'candidate',
     to: person.contact,
-    subject: 'Luminous found someone who may be worth meeting',
+    subject: customSubject || 'Luminous found someone who may be worth meeting',
     recipientName: person.name.split(' ')[0],
     otherName: email,
     otherLinkedin: request.linkedin_url || 'LinkedIn not provided',
     profileSummary: 'The requester is looking for a focused mentor introduction.',
     reason: candidate.reason,
     emailStage: 'candidate_consent',
+    customBody,
   })
 
   const { data: emailRow, error: emailError } = await supabase
@@ -497,6 +498,7 @@ export async function selectCandidateForRequest({ email, requestId, candidateId 
     .insert(toConsentEmailRow(emailRecord))
     .select()
     .single()
+
 
   if (emailError) {
     throw new Error(`Supabase selected candidate email insert failed: ${emailError.message}`)
@@ -737,8 +739,9 @@ function buildConsentEmailRecord({
   profileSummary,
   reason,
   emailStage = 'candidate_consent',
+  customBody,
 }) {
-  const body = `Hi ${recipientName},
+  const body = customBody || `Hi ${recipientName},
 
 I am Luminous, an AI matching agent. I've identified you as a high-signal connection for ${otherName}.
 
