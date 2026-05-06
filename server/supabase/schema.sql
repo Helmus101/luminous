@@ -97,11 +97,22 @@ create table if not exists public.connections (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.waitlist (
+  id uuid primary key default gen_random_uuid(),
+  email text not null unique,
+  query text,
+  source text default 'landing_page',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.profiles add column if not exists profile_json jsonb not null default '{}'::jsonb;
 
 create index if not exists people_external_key_idx on public.people(external_key);
 create index if not exists match_requests_requester_month_idx on public.match_requests(requester_email, created_at);
 create index if not exists consent_emails_request_idx on public.consent_emails(request_id);
+create index if not exists waitlist_email_idx on public.waitlist(email);
+create index if not exists waitlist_created_at_idx on public.waitlist(created_at desc);
 
 alter table public.users add column if not exists auth_user_id uuid unique;
 alter table public.users add column if not exists first_name text;

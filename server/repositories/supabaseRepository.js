@@ -175,6 +175,45 @@ export async function findBestMatches(userContext) {
   .slice(0, 3);
 }
 
+// 5. WAITLIST
+export async function addToWaitlist(email, query) {
+  // Check if email already exists in waitlist
+  const { data: existing } = await supabase
+    .from('waitlist')
+    .select('id')
+    .eq('email', email.toLowerCase().trim())
+    .maybeSingle();
+  
+  if (existing) {
+    // Update the query if they already exist
+    if (query) {
+      await supabase
+        .from('waitlist')
+        .update({ 
+          query: query,
+          updated_at: new Date()
+        })
+        .eq('id', existing.id);
+    }
+    return { success: true, wasNew: false };
+  }
+  
+  // Insert new waitlist entry
+  const { error } = await supabase
+    .from('waitlist')
+    .insert({ 
+      email: email.toLowerCase().trim(),
+      query: query || null
+    });
+  
+  if (error) {
+    console.error('Error adding to waitlist:', error);
+    throw error;
+  }
+  
+  return { success: true, wasNew: true };
+}
+
 // HELPERS
 async function getUserIdByEmail(email) {
   const { data, error } = await supabase

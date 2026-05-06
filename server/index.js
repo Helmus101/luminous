@@ -9,6 +9,7 @@ import {
   getSearchQuota,
   addIntro,
   deleteAllChatHistory,
+  addToWaitlist,
   supabase
 } from './repositories/supabaseRepository.js';
 
@@ -235,6 +236,22 @@ app.post('/api/linkedin-profile', async (req, res) => {
     res.json({ success: true, profile });
   } catch (err) {
     res.status(500).json({ error: 'Failed to extract profile' });
+  }
+});
+
+app.post('/api/waitlist', async (req, res) => {
+  const { email, query } = req.body;
+  
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+  
+  try {
+    const result = await addToWaitlist(email, query);
+    res.json({ success: true, wasNew: result.wasNew });
+  } catch (err) {
+    console.error('Failed to add to waitlist:', err);
+    res.status(500).json({ error: 'Failed to join waitlist' });
   }
 });
 
