@@ -47,16 +47,21 @@ function inferUserContext(messages = []) {
   const firstUserMessage = userMessages[0]?.trim() || '';
   const likelyName = firstUserMessage.length <= 42
     && !/[?]/.test(firstUserMessage)
-    && !/\\b(i am|i'm|looking|find|mentor|student|university|college|high school|linkedin)\\b/i.test(firstUserMessage)
-      ? firstUserMessage.replace(/^my name is\\s+/i, '').trim()
+    && !/\b(i am|i'm|looking|find|mentor|student|university|college|high school|linkedin)\b/i.test(firstUserMessage)
+      ? firstUserMessage.replace(/^my name is\s+/i, '').trim()
       : null;
 
-  const isUniversityStudent = /\\b(university student|college student|freshman|sophomore|junior|senior|undergrad|undergraduate|i go to|i study at|my university|my college)\\b/i.test(joined);
-  const isHighSchoolStudent = /\\b(high school|secondary school|applying|prospective|college applications|university applications)\\b/i.test(joined);
+  const isUniversityStudent = /\b(university student|college student|freshman|sophomore|junior|senior|undergrad|undergraduate|i go to|i study at|my university|my college)\b/i.test(joined);
+  const isHighSchoolStudent = /\b(high school|secondary school|applying|prospective|college applications|university applications)\b/i.test(joined);
   
+  // Extract university
+  const universityMatch = joined.match(/\b(at|to|from|school:)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
+  const university = universityMatch ? universityMatch[2] : null;
+
   return {
     likelyName,
     studentType: isUniversityStudent ? 'university_student' : isHighSchoolStudent ? 'high_school_student' : 'unknown',
+    university,
     interests: [],
     goals: [],
     industries: [],
@@ -85,8 +90,11 @@ export async function syncUserContextToPeople(email, messages = []) {
       external_key: userId,
       name: displayName,
       contact_email: email,
+      background: context.university ? `Student at ${context.university}` : 'Member of the Luminous community',
+      current_role_text: context.studentType === 'university_student' ? 'University Student' : context.studentType === 'high_school_student' ? 'High School Student' : 'Member',
       profile_json: {
         studentType: context.studentType,
+        university: context.university,
         lastSyncedAt: new Date().toISOString(),
       },
     }, { onConflict: 'external_key' });

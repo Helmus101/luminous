@@ -1,26 +1,48 @@
-import { useEffect, useRef, useState, ReactNode } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link } from 'react-router-dom'
+import { useEffect, useRef, useState, ReactNode, useCallback } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link, useSearchParams } from 'react-router-dom'
 import './App.css'
 import DiscoveryContent from './DiscoveryContent'
 
 type Role = 'user' | 'assistant'
 
+interface Candidate {
+  name: string;
+  reason: string;
+  linkedinUrl: string;
+  description?: string;
+}
+
 type AssistantPayload =
   | { kind: 'text'; goal?: string }
-  | { kind: 'candidates'; candidates: { name: string; reason: string; linkedinUrl: string }[] }
+  | { kind: 'candidates'; candidates: Candidate[] }
   | { kind: 'outreach_triggered'; candidateName: string }
 
-type ChatMessage = {
-  id: string
-  role: Role
-  content: string
-  payload?: AssistantPayload
+interface ChatMessage {
+  id: string;
+  role: Role;
+  content: string;
+  payload?: AssistantPayload;
 }
 
 const welcomeMessage: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
   content: "Welcome to Weave. I build student-voice campus intelligence and connect people when it is useful. Before we begin, what should I call you?",
+}
+
+// --- MatchCard Component ---
+function MatchCard({ candidate, onSelect }: { candidate: Candidate; onSelect: (name: string) => void }) {
+  return (
+    <div className="candidate-card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <h4>{candidate.name}</h4>
+        <a href={candidate.linkedinUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none', fontWeight: 600 }}>LinkedIn</a>
+      </div>
+      <p className="human-truth">{candidate.reason}</p>
+      {candidate.description && <p className="candidate-reason">{candidate.description}</p>}
+      <button onClick={() => onSelect(candidate.name)}>Request Intro</button>
+    </div>
+  )
 }
 
 // --- Protected Route Wrapper ---
@@ -44,27 +66,29 @@ function App() {
     setEmail('');
   }
 
-  const fetchLatestChat = async (userEmail: string) => {
-    try {
-      const resp = await fetch(`/api/chat/latest?email=${encodeURIComponent(userEmail)}`)
-      if (resp.ok) {
-        const data = await resp.json()
-        if (data.messages && data.messages.length > 0) setMessages(data.messages)
-      }
-    } catch (err) {
-      console.error('History load failed', err)
-    }
-  }
-
   useEffect(() => {
-    if (email) fetchLatestChat(email)
+    if (!email) return
+    let ignore = false
+    const fetchLatestChat = async () => {
+      try {
+        const resp = await fetch(`/api/chat/latest?email=${encodeURIComponent(email)}`)
+        if (resp.ok && !ignore) {
+          const data = await resp.json()
+          if (data.messages && data.messages.length > 0) setMessages(data.messages)
+        }
+      } catch (err) {
+        console.error('History load failed', err)
+      }
+    }
+    fetchLatestChat()
+    return () => { ignore = true }
   }, [email])
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages])
 
-  const sendUserMessage = async (text: string) => {
+  const sendUserMessage = useCallback(async (text: string) => {
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text }
     setMessages(prev => [...prev, userMsg])
     setIsSending(true)
@@ -82,7 +106,7 @@ function App() {
     } finally {
       setIsSending(false)
     }
-  }
+  }, [messages, email])
 
   return (
     <BrowserRouter>
@@ -95,7 +119,7 @@ function App() {
           element={
             <ProtectedRoute email={email}>
               <AuthenticatedLayout onLogout={handleLogout}>
-                <ChatView 
+                <ChatContainer 
                   messages={messages} 
                   transcriptRef={transcriptRef} 
                   sendUserMessage={sendUserMessage} 
@@ -229,12 +253,17 @@ function LandingPage() {
   )
 }
 
-function AuthPage({ email, setEmail }: any) {
+interface AuthPageProps {
+  email: string;
+  setEmail: (email: string) => void;
+}
+
+function AuthPage({ email, setEmail }: AuthPageProps) {
   const navigate = useNavigate()
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
-  const handleSubmit = async (e: any) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     try {
@@ -253,6 +282,7 @@ function AuthPage({ email, setEmail }: any) {
         setError(data.error || 'Authentication failed')
       }
     } catch (err) {
+      console.error(err)
       setError('Connection error')
     }
   }
@@ -383,23 +413,55 @@ function AuthenticatedLayout({ children, onLogout }: { children: ReactNode, onLo
   )
 }
 
-function ChatView({ messages, transcriptRef, sendUserMessage, chatInput, setChatInput, isSending }: any) {
+interface ChatProps {
+  messages: ChatMessage[];
+  transcriptRef: React.RefObject<HTMLDivElement | null>;
+  sendUserMessage: (text: string) => Promise<void>;
+  chatInput: string;
+  setChatInput: (text: string) => void;
+  isSending: boolean;
+}
+
+function ChatContainer({ messages, transcriptRef, sendUserMessage, chatInput, setChatInput, isSending }: ChatProps) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialQueryHandled = useRef(false)
+
+  useEffect(() => {
+    const query = searchParams.get('q')
+    if (query && !initialQueryHandled.current) {
+      initialQueryHandled.current = true
+      // Clear the query param
+      setSearchParams({}, { replace: true })
+      // Send the message
+      sendUserMessage(query)
+    }
+  }, [searchParams, sendUserMessage, setSearchParams])
+
+  return (
+    <ChatView 
+      messages={messages} 
+      transcriptRef={transcriptRef} 
+      sendUserMessage={sendUserMessage} 
+      chatInput={chatInput} 
+      setChatInput={setChatInput} 
+      isSending={isSending}
+    />
+  )
+}
+
+function ChatView({ messages, transcriptRef, sendUserMessage, chatInput, setChatInput, isSending }: ChatProps) {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div className="chat-transcript" ref={transcriptRef}>
-        {messages.map((m: any) => (
+        {messages.map((m) => (
           <div key={m.id} className={`msg-row ${m.role}`}>
-            <div className="msg-avatar">{m.role === 'assistant' ? 'L' : 'U'}</div>
+            <div className="msg-avatar">{m.role === 'assistant' ? 'W' : 'U'}</div>
             <div className="msg-bubble">
-              {m.content}
+              <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
               {m.payload?.kind === 'candidates' && (
                 <div className="candidate-grid">
-                  {m.payload.candidates.map((c: any) => (
-                    <div key={c.name} className="candidate-card">
-                      <h4>{c.name}</h4>
-                      <p>{c.reason}</p>
-                      <button onClick={() => sendUserMessage(`SELECT_CANDIDATE: ${c.name}`)}>Request Intro</button>
-                    </div>
+                  {m.payload.candidates.map((c) => (
+                    <MatchCard key={c.name} candidate={c} onSelect={(name) => sendUserMessage(`SELECT_CANDIDATE: ${name}`)} />
                   ))}
                 </div>
               )}
