@@ -54,6 +54,96 @@ export async function addIntro(email, requestId, candidateId) {
   if (error) console.error('Error saving connection:', error);
 }
 
+export async function saveWaitlistLead({ email, initialQuery, source = 'landing' }) {
+  const { error } = await supabase.from('waitlist').insert({
+    email,
+    initial_query: initialQuery,
+    source,
+  });
+
+  if (error) {
+    console.error('Error saving waitlist lead:', error);
+    throw error;
+  }
+}
+
+export async function saveCampusContribution({ campusSlug, campusName, email, input, decision }) {
+  const payload = {
+    campus_slug: campusSlug,
+    campus_name: campusName,
+    contributor_email: email || null,
+    raw_input: input,
+    status: decision.shouldAdd ? 'approved' : 'rejected',
+    category: decision.category,
+    public_summary: decision.publicSummary,
+    confidence: decision.confidence,
+    rationale: decision.rationale,
+  };
+
+  const { error } = await supabase.from('campus_contributions').insert(payload);
+  if (error) {
+    console.error('Error saving campus contribution:', error);
+    throw error;
+  }
+}
+
+export async function saveLinkedInProfileImport({ email, linkedinUrl, extraction }) {
+  const userId = await getUserIdByEmail(email);
+
+  await supabase
+    .from('users')
+    .update({ linkedin_url: linkedinUrl })
+    .eq('email', email);
+
+  const payload = {
+    user_id: userId,
+    email,
+    source: 'linkedin',
+    file_name: extraction.sourceDetail || 'linkedin_profile',
+    summary: extraction.summary || 'LinkedIn profile imported.',
+    specific_reason: extraction.specificReason || null,
+    target_person: extraction.targetPerson || null,
+    industries: extraction.industries || [],
+    locations: extraction.locations || [],
+    skills: extraction.skills || [],
+    education_signals: extraction.educationSignals || [],
+    interests: extraction.interests || [],
+    goals: extraction.goals || [],
+    constraints: extraction.constraints || [],
+    confidence: extraction.confidence || 'medium',
+    missing_info: extraction.missingInfo || [],
+    extraction_mode: extraction.extractionMode || 'linkedin_fallback',
+    profile_json: {
+      linkedinUrl,
+      name: extraction.name,
+      headline: extraction.headline,
+      currentRole: extraction.currentRole,
+      company: extraction.company,
+      location: extraction.location,
+      experience: extraction.experience || [],
+      education: extraction.education || [],
+      certifications: extraction.certifications || [],
+      projects: extraction.projects || [],
+      volunteer: extraction.volunteer || [],
+      publicSignals: extraction.publicSignals || [],
+      rawSignalCount: extraction.rawSignalCount || 0,
+    },
+  };
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .insert(payload)
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('Error saving LinkedIn profile import:', error);
+    throw error;
+  }
+
+  return data;
+}
+
 // 2. CHAT PERSISTENCE
 export async function getLatestChatSession(email) {
   const { data: session, error: sError } = await supabase
