@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, ReactNode, useCallback } from 'react'
+import { useEffect, useRef, useState, type ReactNode, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link, useSearchParams } from 'react-router-dom'
 import './App.css'
 import DiscoveryContent from './DiscoveryContent'
@@ -30,6 +30,7 @@ const welcomeMessage: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
   content: "Welcome to Weave. I build student-voice campus intelligence and connect people when it is useful. Before we begin, what should I call you?",
+  payload: { kind: 'text', goal: 'name' }
 }
 
 // --- MatchCard Component ---
@@ -69,7 +70,7 @@ function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage])
   const [chatInput, setChatInput] = useState('')
   const [isSending, setIsSending] = useState(false)
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false)
+  const [isHistoryLoading, setIsHistoryLoading] = useState(!!localStorage.getItem('weave-email'))
   const transcriptRef = useRef<HTMLDivElement>(null)
 
   const handleLogout = () => {
@@ -369,6 +370,29 @@ function AuthPage({ onLoginSuccess }: AuthPageProps) {
 function WaitlistPage() {
   const navigate = useNavigate()
   const [submitted, setSubmitted] = useState(false)
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [workingOn, setWorkingOn] = useState('')
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      await fetch('/api/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          email, 
+          studentType: 'unknown', 
+          source: 'waitlist',
+          initial_query: `Name: ${name}. Working on: ${workingOn}`
+        })
+      })
+      setSubmitted(true)
+    } catch (err) {
+      console.error('Waitlist error:', err)
+      setSubmitted(true)
+    }
+  }
   
   return (
     <div className="landing-weave-root">
@@ -386,11 +410,31 @@ function WaitlistPage() {
               <h1 className="hero-title" style={{fontSize: '3.5rem'}}>Join the <br/><em>inner circle</em>.</h1>
               <p className="hero-description">Weave is currently invite-only to maintain the quality of our community. Apply for access and we'll reach out shortly.</p>
               
-              <form className="hero-cta-box" style={{margin:'0', textAlign:'left'}} onSubmit={(e) => { e.preventDefault(); setSubmitted(true); }}>
+              <form className="hero-cta-box" style={{margin:'0', textAlign:'left'}} onSubmit={handleSubmit}>
                 <div className="input-row" style={{gridTemplateColumns:'1fr'}}>
-                  <input type="text" placeholder="Full name" required style={{marginBottom:'8px'}}/>
-                  <input type="email" placeholder="University or school email" required style={{marginBottom:'8px'}}/>
-                  <input type="text" placeholder="What are you working on / studying?" required />
+                  <input 
+                    type="text" 
+                    placeholder="Full name" 
+                    required 
+                    style={{marginBottom:'8px'}}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                  <input 
+                    type="email" 
+                    placeholder="University or school email" 
+                    required 
+                    style={{marginBottom:'8px'}}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                  <input 
+                    type="text" 
+                    placeholder="What are you working on / studying?" 
+                    required 
+                    value={workingOn}
+                    onChange={(e) => setWorkingOn(e.target.value)}
+                  />
                 </div>
                 <button type="submit" className="invite-btn" style={{marginTop:'12px'}}>
                   Request Invitation
