@@ -5,12 +5,14 @@ import cors from 'cors';
 import { 
   saveChatTranscript, 
   getLatestChatSession, 
-  getIntroCountThisMonth,
-  findBestMatches,
-  deleteAllChatHistory,
-  ensureUserPerson
+  ensureUserPerson,
+  saveWaitlistLead,
+  findPersonByName,
+  signInUser,
+  signUpUser
 } from './repositories/supabaseRepository.js';
-import { generateChatResponse, extractStructuredProfile } from './matchingEngine.js';
+import { generateChatResponse } from './matchingEngine.js';
+import { sendOutreachEmail } from './mailer.js';
 
 const app = express();
 app.use(cors());
@@ -18,87 +20,51 @@ app.use(express.json());
 
 const PORT = 3001;
 
-// 1. CHAT HISTORY PERSISTENCE
-app.get('/api/chat/latest', async (req, res) => {
-  const { email } = req.query;
-  if (!email) return res.status(400).json({ error: 'Email required' });
-  
-  try {
-    await ensureUserPerson(email);
-    const session = await getLatestChatSession(email);
-    res.json(session);
-  } catch (err) {
-    console.error('Latest chat error:', err);
-    res.status(500).json({ messages: [] });
-  }
-});
-
-app.post('/api/users/ensure', async (req, res) => {
-  const email = String(req.body?.email || '').trim().toLowerCase();
-  if (!email) return res.status(400).json({ error: 'Email required' });
-
-  try {
-    await ensureUserPerson(email);
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Ensure user failed:', err);
-    res.status(500).json({ error: 'Failed to create user profile' });
-  }
-});
-
 app.post('/api/chat', async (req, res) => {
   const { messages, email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email required' });
 
   try {
-    const lastMsg = messages[messages.length - 1].content.trim();
-    
-    // 0. SYSTEM COMMANDS
-    if (lastMsg.toLowerCase() === 'deleteall--00') {
-      await deleteAllChatHistory(email);
-      console.log(`History purged for ${email}`);
-      return res.json({ 
-        text: "History purged. We're starting with a clean slate.",
-        payload: { kind: 'text', action: 'clear_chat' } 
-      });
-    }
-
-    // Check quota for searches
-    const count = await getIntroCountThisMonth(email);
-    const isSearchRequest = lastMsg.toLowerCase().includes('search') || lastMsg.toLowerCase().includes('match') || lastMsg.toLowerCase().includes('mentor');
-
-    if (isSearchRequest && count >= 3) {
-      return res.status(429).json({ 
-        text: "You've reached your maximum of 3 search requests this month. We do this to ensure every connection remains high-quality.",
-        payload: { kind: 'text', text: "Quota reached" }
-      });
-    }
-
-    // Pass email to check for professional profile context
     const aiResponse = await generateChatResponse(messages, email);
     
-    // ATOMIC SAVE: ensure messages are saved to Supabase
-    await saveChatTranscript(email, [...messages, { role: 'assistant', content: aiResponse.text, payload: aiResponse.payload }]);
+    // Handle special actions
+    if (aiResponse.payload?.kind === 'outreach_triggered') {
+      const candidateName = aiResponse.payload.candidateName;
+      const person = await findPersonByName(candidateName);
+      if (person && person.contact_email) {
+        await sendOutreachEmail(person.contact_email, email);
+      }
+    }
 
+    await saveChatTranscript(email, [...messages, { role: 'assistant', content: aiResponse.text, payload: aiResponse.payload }]);
     res.json(aiResponse);
   } catch (err) {
     console.error('Chat API Error:', err);
-    res.status(500).json({ text: "I encountered an error saving our conversation. Please try again." });
+    res.status(500).json({ text: "I encountered an error." });
   }
 });
 
-// 2. LINKEDIN INTELLIGENCE
-app.post('/api/linkedin-profile', async (req, res) => {
-  const { linkedinUrl, email } = req.body;
-  
-  try {
-    const profile = await extractStructuredProfile(linkedinUrl);
-    // In Supabase repo, we would have a function to update the user profile
-    // For now we simulate success and save context
-    res.json({ success: true, profile });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to extract profile' });
-  }
+app.get('/api/chat/latest', async (req, res) => {
+  const { email } = req.query;
+  const session = await getLatestChatSession(email);
+  res.json(session);
+});
+
+app.post('/api/users/ensure', async (req, res) => {
+  await ensureUserPerson(req.body.email);
+  res.json({ success: true });
+});
+
+app.post('/api/waitlist', async (req, res) => {
+  await saveWaitlistLead(req.body);
+  res.status(201).json({ success: true });
+});
+
+app.post('/api/auth/signin', async (req, res) => {
+  const { email, password } = req.body;
+  const result = await signInUser(email, password);
+  if (result.error) return res.status(401).json({ error: result.error });
+  res.json({ success: true, email });
 });
 
 app.listen(PORT, () => {
