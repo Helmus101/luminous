@@ -10,6 +10,8 @@ interface Candidate {
   reason: string;
   linkedinUrl: string;
   description?: string;
+  location?: string;
+  expertise?: string[];
 }
 
 type AssistantPayload =
@@ -34,61 +36,92 @@ const welcomeMessage: ChatMessage = {
 function MatchCard({ candidate, onSelect }: { candidate: Candidate; onSelect: (name: string) => void }) {
   return (
     <div className="candidate-card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <h4>{candidate.name}</h4>
-        <a href={candidate.linkedinUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none', fontWeight: 600 }}>LinkedIn</a>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+        <h4 style={{ margin: 0, fontSize: '15px' }}>{candidate.name}</h4>
+        <a href={candidate.linkedinUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: '#3b82f6', textDecoration: 'none', fontWeight: 700, textTransform: 'uppercase' }}>LinkedIn</a>
       </div>
-      <p className="human-truth">{candidate.reason}</p>
-      {candidate.description && <p className="candidate-reason">{candidate.description}</p>}
-      <button onClick={() => onSelect(candidate.name)}>Request Intro</button>
+      <p className="human-truth" style={{ fontSize: '13px', color: '#475569', marginBottom: '12px', lineHeight: 1.4 }}>{candidate.reason}</p>
+      {candidate.location && <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, marginBottom: '4px' }}>📍 {candidate.location}</div>}
+      {candidate.expertise && (
+        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '12px' }}>
+          {candidate.expertise.slice(0, 2).map(e => (
+            <span key={e} style={{ fontSize: '10px', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', color: '#64748b' }}>{e}</span>
+          ))}
+        </div>
+      )}
+      <button onClick={() => onSelect(candidate.name)} style={{ width: '100%', padding: '8px', borderRadius: '8px', background: '#0f172a', color: 'white', border: 'none', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>Request Intro</button>
     </div>
   )
 }
 
 // --- Protected Route Wrapper ---
-function ProtectedRoute({ children, email }: { children: ReactNode; email: string }) {
-  if (!email) {
-    return <Navigate to="/signin" replace />
+function ProtectedRoute({ children, isAuthenticated }: { children: ReactNode; isAuthenticated: boolean }) {
+  const location = useLocation()
+  if (!isAuthenticated) {
+    return <Navigate to={`/signin?redirect=${encodeURIComponent(location.pathname + location.search)}`} replace />
   }
   return <>{children}</>
 }
 
 // --- Main App Component ---
 function App() {
-  const [email, setEmail] = useState(() => localStorage.getItem('weave-email') || '')
+  const [currentUserEmail, setCurrentUserEmail] = useState(() => localStorage.getItem('weave-email') || '')
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage])
   const [chatInput, setChatInput] = useState('')
   const [isSending, setIsSending] = useState(false)
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false)
   const transcriptRef = useRef<HTMLDivElement>(null)
 
   const handleLogout = () => {
     localStorage.removeItem('weave-email');
-    setEmail('');
+    setCurrentUserEmail('');
+    setMessages([welcomeMessage]);
   }
 
   useEffect(() => {
-    if (!email) return
+    if (!currentUserEmail) return
     let ignore = false
     const fetchLatestChat = async () => {
+      setIsHistoryLoading(true)
       try {
-        const resp = await fetch(`/api/chat/latest?email=${encodeURIComponent(email)}`)
+        const resp = await fetch(`/api/chat/latest?email=${encodeURIComponent(currentUserEmail)}`)
         if (resp.ok && !ignore) {
           const data = await resp.json()
-          if (data.messages && data.messages.length > 0) setMessages(data.messages)
+          if (data.messages && data.messages.length > 0) {
+            setMessages(data.messages)
+          } else {
+            setMessages([welcomeMessage])
+          }
         }
       } catch (err) {
         console.error('History load failed', err)
+      } finally {
+        if (!ignore) setIsHistoryLoading(false)
       }
     }
     fetchLatestChat()
     return () => { ignore = true }
-  }, [email])
+  }, [currentUserEmail])
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages])
 
   const sendUserMessage = useCallback(async (text: string) => {
+    if (text === 'deleteall--00') {
+      try {
+        await fetch('/api/chat/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: currentUserEmail })
+        })
+        setMessages([welcomeMessage])
+        return
+      } catch (err) {
+        console.error('Clear failed', err)
+      }
+    }
+
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text }
     setMessages(prev => [...prev, userMsg])
     setIsSending(true)
@@ -97,7 +130,7 @@ function App() {
       const resp = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...messages, userMsg], email })
+        body: JSON.stringify({ messages: [...messages, userMsg], email: currentUserEmail })
       })
       const data = await resp.json()
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: data.text, payload: data.payload }])
@@ -106,18 +139,18 @@ function App() {
     } finally {
       setIsSending(false)
     }
-  }, [messages, email])
+  }, [messages, currentUserEmail])
 
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<LandingPage />} />
-        <Route path="/signin" element={<AuthPage email={email} setEmail={setEmail} />} />
+        <Route path="/signin" element={<AuthPage onLoginSuccess={(email) => setCurrentUserEmail(email)} />} />
         <Route path="/waitlist" element={<WaitlistPage />} />
         <Route 
           path="/chat" 
           element={
-            <ProtectedRoute email={email}>
+            <ProtectedRoute isAuthenticated={!!currentUserEmail}>
               <AuthenticatedLayout onLogout={handleLogout}>
                 <ChatContainer 
                   messages={messages} 
@@ -126,6 +159,7 @@ function App() {
                   chatInput={chatInput} 
                   setChatInput={setChatInput} 
                   isSending={isSending}
+                  isHistoryLoading={isHistoryLoading}
                 />
               </AuthenticatedLayout>
             </ProtectedRoute>
@@ -134,7 +168,7 @@ function App() {
         <Route 
           path="/discovery" 
           element={
-            <ProtectedRoute email={email}>
+            <ProtectedRoute isAuthenticated={!!currentUserEmail}>
               <AuthenticatedLayout onLogout={handleLogout}>
                 <DiscoveryContent />
               </AuthenticatedLayout>
@@ -144,7 +178,7 @@ function App() {
         <Route 
           path="/discovery/:slug" 
           element={
-            <ProtectedRoute email={email}>
+            <ProtectedRoute isAuthenticated={!!currentUserEmail}>
               <AuthenticatedLayout onLogout={handleLogout}>
                 <DiscoveryContent />
               </AuthenticatedLayout>
@@ -254,12 +288,13 @@ function LandingPage() {
 }
 
 interface AuthPageProps {
-  email: string;
-  setEmail: (email: string) => void;
+  onLoginSuccess: (email: string) => void;
 }
 
-function AuthPage({ email, setEmail }: AuthPageProps) {
+function AuthPage({ onLoginSuccess }: AuthPageProps) {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
@@ -267,7 +302,6 @@ function AuthPage({ email, setEmail }: AuthPageProps) {
     e.preventDefault()
     setError('')
     try {
-      // Use window.location.hostname to support both localhost and network access
       const backendUrl = `http://${window.location.hostname}:3001/api/auth/signin`
       const resp = await fetch(backendUrl, {
         method: 'POST',
@@ -277,7 +311,9 @@ function AuthPage({ email, setEmail }: AuthPageProps) {
       const data = await resp.json()
       if (resp.ok) {
         localStorage.setItem('weave-email', email)
-        navigate('/chat')
+        onLoginSuccess(email)
+        const redirect = searchParams.get('redirect') || '/chat'
+        navigate(redirect)
       } else {
         setError(data.error || 'Authentication failed')
       }
@@ -292,28 +328,28 @@ function AuthPage({ email, setEmail }: AuthPageProps) {
       <div className="auth-panel">
         <h2 style={{ textAlign: 'center', marginBottom: '8px' }}>Welcome to Weave</h2>
         <p style={{ textAlign: 'center', color: '#64748b', marginBottom: '32px', fontSize: '14px' }}>We're currently in invite-only beta.<br/>Sign in to your account.</p>
-        
+
         {error && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '12px', borderRadius: '8px', marginBottom: '24px', fontSize: '13px', textAlign: 'center', fontWeight: 600 }}>{error}</div>}
 
         <form className="auth-form" onSubmit={handleSubmit}>
           <div style={{ marginBottom: '16px' }}>
             <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', marginBottom: '8px' }}>Institutional Email</label>
-            <input 
-              type="email" 
-              placeholder="you@university.edu" 
-              value={email} 
-              onChange={e => { setEmail(e.target.value); }} 
-              required 
+            <input
+              type="email"
+              placeholder="you@university.edu"
+              value={email}
+              onChange={e => { setEmail(e.target.value); }}
+              required
             />
           </div>
           <div style={{ marginBottom: '24px' }}>
             <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', marginBottom: '8px' }}>Password</label>
-            <input 
-              type="password" 
-              placeholder="••••••••" 
-              value={password} 
-              onChange={e => setPassword(e.target.value)} 
-              required 
+            <input
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
             />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -420,22 +456,23 @@ interface ChatProps {
   chatInput: string;
   setChatInput: (text: string) => void;
   isSending: boolean;
+  isHistoryLoading: boolean;
 }
 
-function ChatContainer({ messages, transcriptRef, sendUserMessage, chatInput, setChatInput, isSending }: ChatProps) {
+function ChatContainer({ messages, transcriptRef, sendUserMessage, chatInput, setChatInput, isSending, isHistoryLoading }: ChatProps) {
   const [searchParams, setSearchParams] = useSearchParams()
   const initialQueryHandled = useRef(false)
 
   useEffect(() => {
     const query = searchParams.get('q')
-    if (query && !initialQueryHandled.current) {
+    if (query && !initialQueryHandled.current && !isHistoryLoading) {
       initialQueryHandled.current = true
       // Clear the query param
       setSearchParams({}, { replace: true })
       // Send the message
       sendUserMessage(query)
     }
-  }, [searchParams, sendUserMessage, setSearchParams])
+  }, [searchParams, sendUserMessage, setSearchParams, isHistoryLoading])
 
   return (
     <ChatView 
@@ -445,35 +482,50 @@ function ChatContainer({ messages, transcriptRef, sendUserMessage, chatInput, se
       chatInput={chatInput} 
       setChatInput={setChatInput} 
       isSending={isSending}
+      isHistoryLoading={isHistoryLoading}
     />
   )
 }
 
-function ChatView({ messages, transcriptRef, sendUserMessage, chatInput, setChatInput, isSending }: ChatProps) {
+function ChatView({ messages, transcriptRef, sendUserMessage, chatInput, setChatInput, isSending, isHistoryLoading }: ChatProps) {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div className="chat-transcript" ref={transcriptRef}>
-        {messages.map((m) => (
-          <div key={m.id} className={`msg-row ${m.role}`}>
-            <div className="msg-avatar">{m.role === 'assistant' ? 'W' : 'U'}</div>
-            <div className="msg-bubble">
-              <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
-              {m.payload?.kind === 'candidates' && (
-                <div className="candidate-grid">
-                  {m.payload.candidates.map((c) => (
-                    <MatchCard key={c.name} candidate={c} onSelect={(name) => sendUserMessage(`SELECT_CANDIDATE: ${name}`)} />
-                  ))}
-                </div>
-              )}
-            </div>
+        {isHistoryLoading ? (
+          <div className="history-loading">
+            <div className="loading-spinner"></div>
+            <span>Restoring your conversation...</span>
           </div>
-        ))}
+        ) : (
+          <>
+            {messages.map((m) => (
+              <div key={m.id} className={`msg-row ${m.role}`}>
+                <div className="msg-avatar">{m.role === 'assistant' ? 'W' : 'U'}</div>
+                <div className="msg-bubble">
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
+                  {m.payload?.kind === 'candidates' && (
+                    <div className="candidate-grid">
+                      {m.payload.candidates.map((c) => (
+                        <MatchCard key={c.name} candidate={c} onSelect={(name) => sendUserMessage(`SELECT_CANDIDATE: ${name}`)} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
         {isSending && <div className="msg-row assistant"><div className="msg-avatar">...</div></div>}
       </div>
       <div className="chat-composer">
         <form className="composer-pill" onSubmit={(e) => { e.preventDefault(); if(chatInput.trim()) { sendUserMessage(chatInput); setChatInput(''); } }}>
-          <input value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Say something..." />
-          <button type="submit">→</button>
+          <input 
+            value={chatInput} 
+            onChange={e => setChatInput(e.target.value)} 
+            placeholder={isHistoryLoading ? "Loading history..." : "Say something..."} 
+            disabled={isHistoryLoading || isSending}
+          />
+          <button type="submit" disabled={isHistoryLoading || isSending || !chatInput.trim()}>→</button>
         </form>
       </div>
     </div>
