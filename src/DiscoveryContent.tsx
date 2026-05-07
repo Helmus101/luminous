@@ -260,7 +260,7 @@ export default function DiscoveryContent() {
                       <h4 style={{ margin: '0 0 12px 0' }}>Request Intro</h4>
                       <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: 1.5 }}>Connect with a student at {selectedUni.name} to get the real story.</p>
                       <button 
-                        onClick={() => navigate('/chat')}
+                        onClick={() => navigate(`/chat?q=I want to talk to someone at ${selectedUni.name}`)}
                         style={{ width: '100%', background: '#3b82f6', border: 'none', color: 'white', padding: '12px', borderRadius: '12px', marginTop: '16px', fontWeight: 700, cursor: 'pointer' }}
                       >
                         Talk to Guide
