@@ -218,10 +218,9 @@ function LandingPage() {
           </p>
 
           <div className="hero-cta-box">
-             <div className="type-toggle">
-                <button className="active">High school</button>
-                <button>At university</button>
-                <button>Curious</button>
+             <div className="type-toggle" style={{gridTemplateColumns: '1fr 1fr'}}>
+                <button className="active">HS student</button>
+                <button>Uni student</button>
              </div>
              <div className="input-row">
                 <input type="text" placeholder="Your name" />
@@ -372,7 +371,7 @@ function WaitlistPage() {
   const [submitted, setSubmitted] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [workingOn, setWorkingOn] = useState('')
+  const [studentType, setStudentType] = useState<'high_school_student' | 'university_student'>('high_school_student')
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -382,9 +381,9 @@ function WaitlistPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           email, 
-          studentType: 'unknown', 
+          studentType, 
           source: 'waitlist',
-          initial_query: `Name: ${name}. Working on: ${workingOn}`
+          initial_query: `Name: ${name}`
         })
       })
       setSubmitted(true)
@@ -411,6 +410,22 @@ function WaitlistPage() {
               <p className="hero-description">Weave is currently invite-only to maintain the quality of our community. Apply for access and we'll reach out shortly.</p>
               
               <form className="hero-cta-box" style={{margin:'0', textAlign:'left'}} onSubmit={handleSubmit}>
+                <div className="type-toggle" style={{gridTemplateColumns: '1fr 1fr', marginBottom: '16px'}}>
+                  <button 
+                    type="button"
+                    className={studentType === 'high_school_student' ? 'active' : ''} 
+                    onClick={() => setStudentType('high_school_student')}
+                  >
+                    HS student
+                  </button>
+                  <button 
+                    type="button"
+                    className={studentType === 'university_student' ? 'active' : ''} 
+                    onClick={() => setStudentType('university_student')}
+                  >
+                    Uni student
+                  </button>
+                </div>
                 <div className="input-row" style={{gridTemplateColumns:'1fr'}}>
                   <input 
                     type="text" 
@@ -424,16 +439,8 @@ function WaitlistPage() {
                     type="email" 
                     placeholder="University or school email" 
                     required 
-                    style={{marginBottom:'8px'}}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                  />
-                  <input 
-                    type="text" 
-                    placeholder="What are you working on / studying?" 
-                    required 
-                    value={workingOn}
-                    onChange={(e) => setWorkingOn(e.target.value)}
                   />
                 </div>
                 <button type="submit" className="invite-btn" style={{marginTop:'12px'}}>
