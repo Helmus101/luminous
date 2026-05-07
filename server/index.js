@@ -9,7 +9,8 @@ import {
   saveWaitlistLead,
   findPersonByName,
   signInUser,
-  signUpUser
+  signUpUser,
+  deleteAllChatHistory
 } from './repositories/supabaseRepository.js';
 import { generateChatResponse } from './matchingEngine.js';
 import { sendOutreachEmail } from './mailer.js';
@@ -47,7 +48,14 @@ app.post('/api/chat', async (req, res) => {
 app.get('/api/chat/latest', async (req, res) => {
   const { email } = req.query;
   const session = await getLatestChatSession(email);
-  res.json(session);
+  res.json(session || { messages: [] });
+});
+
+app.post('/api/chat/clear', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  await deleteAllChatHistory(email);
+  res.json({ success: true });
 });
 
 app.post('/api/users/ensure', async (req, res) => {
