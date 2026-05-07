@@ -113,8 +113,9 @@ create table if not exists public.chat_sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references public.users(id) on delete cascade,
   auth_user_id uuid,
-  email text not null,
+  email text not null unique,
   initial_query text,
+  messages jsonb not null default '[]'::jsonb,
   title text not null default 'Luminous chat',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

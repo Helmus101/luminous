@@ -42,26 +42,57 @@ function safeArray(value) {
 function inferUserContext(messages = []) {
   const userMessages = messages.filter(m => m.role === 'user').map(m => m.content || '');
   const joined = userMessages.join('\n');
-  const lower = joined.toLowerCase();
   
-  const firstUserMessage = userMessages[0]?.trim() || '';
-  const likelyName = firstUserMessage.length <= 42
-    && !/[?]/.test(firstUserMessage)
-    && !/\b(i am|i'm|looking|find|mentor|student|university|college|high school|linkedin)\b/i.test(firstUserMessage)
-      ? firstUserMessage.replace(/^my name is\s+/i, '').trim()
-      : null;
+  let likelyName = null;
+  let studentType = 'unknown';
+  let university = null;
+  let linkedInUrl = null;
 
-  const isUniversityStudent = /\b(university student|college student|freshman|sophomore|junior|senior|undergrad|undergraduate|i go to|i study at|my university|my college)\b/i.test(joined);
-  const isHighSchoolStudent = /\b(high school|secondary school|applying|prospective|college applications|university applications)\b/i.test(joined);
+  // Attempt to extract based on conversation goals
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === 'assistant' && m.payload?.goal) {
+      const goal = m.payload.goal;
+      const nextMsg = messages[i + 1];
+      if (nextMsg && nextMsg.role === 'user') {
+        const val = nextMsg.content;
+        if (goal === 'name' && val.length < 50) likelyName = val;
+        if (goal === 'student_type') {
+          if (val.toLowerCase().includes('high school')) studentType = 'high_school_student';
+          else if (val.toLowerCase().includes('university') || val.toLowerCase().includes('college')) studentType = 'university_student';
+        }
+        if (goal === 'uni_context') university = val;
+        if (goal === 'uni_linkedin' && val.includes('linkedin.com')) linkedInUrl = val;
+      }
+    }
+  }
+
+  // Fallback / legacy extraction
+  if (!likelyName) {
+    const firstUserMessage = userMessages[0]?.trim() || '';
+    likelyName = firstUserMessage.length <= 42
+      && !/[?]/.test(firstUserMessage)
+      && !/\b(i am|i'm|looking|find|mentor|student|university|college|high school|linkedin)\b/i.test(firstUserMessage)
+        ? firstUserMessage.replace(/^my name is\s+/i, '').trim()
+        : null;
+  }
+
+  if (studentType === 'unknown') {
+    const isUniversityStudent = /\b(university student|college student|freshman|sophomore|junior|senior|undergrad|undergraduate|i go to|i study at|my university|my college)\b/i.test(joined);
+    const isHighSchoolStudent = /\b(high school|secondary school|applying|prospective|college applications|university applications)\b/i.test(joined);
+    studentType = isUniversityStudent ? 'university_student' : isHighSchoolStudent ? 'high_school_student' : 'unknown';
+  }
+
+  if (!university) {
+    const universityMatch = joined.match(/\b(at|to|from|school:)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
+    university = universityMatch ? universityMatch[2] : null;
+  }
   
-  // Extract university
-  const universityMatch = joined.match(/\b(at|to|from|school:)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
-  const university = universityMatch ? universityMatch[2] : null;
-
   return {
     likelyName,
-    studentType: isUniversityStudent ? 'university_student' : isHighSchoolStudent ? 'high_school_student' : 'unknown',
+    studentType,
     university,
+    linkedinUrl: linkedInUrl,
     interests: [],
     goals: [],
     industries: [],
@@ -90,6 +121,7 @@ export async function syncUserContextToPeople(email, messages = []) {
       external_key: userId,
       name: displayName,
       contact_email: email,
+      linkedin_url: context.linkedinUrl,
       background: context.university ? `Student at ${context.university}` : 'Member of the Luminous community',
       current_role_text: context.studentType === 'university_student' ? 'University Student' : context.studentType === 'high_school_student' ? 'High School Student' : 'Member',
       profile_json: {
@@ -104,8 +136,13 @@ export async function ensureUserPerson(email) {
   return syncUserContextToPeople(email, []);
 }
 
-export async function saveWaitlistLead({ email, studentType, source }) {
-  await supabase.from('waitlist').insert({ email, student_type: studentType, source });
+export async function saveWaitlistLead({ email, studentType, source, initial_query }) {
+  await supabase.from('waitlist').insert({ 
+    email, 
+    student_type: studentType, 
+    source, 
+    initial_query 
+  });
 }
 
 export async function saveChatTranscript(email, messages) {
