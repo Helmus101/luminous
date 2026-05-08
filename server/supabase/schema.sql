@@ -145,6 +145,17 @@ create index if not exists match_requests_selected_candidate_idx on public.match
 create index if not exists consent_emails_stage_idx on public.consent_emails(email_stage);
 
 -- Campus Canvas Addition
+create table if not exists public.waitlist (
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  student_type text,
+  source text,
+  initial_query text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists waitlist_email_idx on public.waitlist(email);
+
 create table if not exists public.campuses (
   id uuid primary key default gen_random_uuid(),
   name text not null,

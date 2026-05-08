@@ -148,6 +148,7 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/signin" element={<AuthPage onLoginSuccess={(email) => setCurrentUserEmail(email)} />} />
         <Route path="/waitlist" element={<WaitlistPage />} />
+        <Route path="/confirmation" element={<ConfirmationPage />} />
         <Route 
           path="/chat" 
           element={
@@ -196,6 +197,33 @@ function App() {
 
 function LandingPage() {
   const navigate = useNavigate()
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [studentType, setStudentType] = useState<'high_school_student' | 'university_student'>('high_school_student')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSubmitting(true)
+    try {
+      await fetch('/api/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          email, 
+          studentType, 
+          source: 'landing_hero',
+          initial_query: `Name: ${name}`
+        })
+      })
+      navigate('/confirmation')
+    } catch (err) {
+      console.error('Waitlist error:', err)
+      navigate('/confirmation') // Navigate anyway to show success state for now
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
   
   return (
     <div className="landing-weave-root">
@@ -204,7 +232,7 @@ function LandingPage() {
           <img src="/logo.png" alt="W" />
           <span>Weave</span>
         </div>
-        <button className="nav-request-btn" onClick={() => navigate('/waitlist')}>Request access →</button>
+        <button className="nav-request-btn" onClick={() => document.getElementById('waitlist-form')?.scrollIntoView({ behavior: 'smooth' })}>Request access →</button>
       </nav>
 
       <main className="landing-hero-section">
@@ -217,19 +245,43 @@ function LandingPage() {
             Weave helps you discover universities through real student experience — and meet people who actually fit. Quiet, intentional, and built around warm introductions.
           </p>
 
-          <div className="hero-cta-box">
+          <form id="waitlist-form" className="hero-cta-box" onSubmit={handleSubmit}>
              <div className="type-toggle" style={{gridTemplateColumns: '1fr 1fr'}}>
-                <button className="active">HS student</button>
-                <button>Uni student</button>
+                <button 
+                  type="button" 
+                  className={studentType === 'high_school_student' ? 'active' : ''} 
+                  onClick={() => setStudentType('high_school_student')}
+                >
+                  HS student
+                </button>
+                <button 
+                  type="button" 
+                  className={studentType === 'university_student' ? 'active' : ''} 
+                  onClick={() => setStudentType('university_student')}
+                >
+                  Uni student
+                </button>
              </div>
              <div className="input-row">
-                <input type="text" placeholder="Your name" />
-                <input type="email" placeholder="Email address" />
+                <input 
+                  type="text" 
+                  placeholder="Your name" 
+                  required 
+                  value={name} 
+                  onChange={e => setName(e.target.value)} 
+                />
+                <input 
+                  type="email" 
+                  placeholder="Email address" 
+                  required 
+                  value={email} 
+                  onChange={e => setEmail(e.target.value)} 
+                />
              </div>
-             <button className="invite-btn" onClick={() => navigate('/waitlist')}>
-               Request an invitation <span className="arrow">→</span>
+             <button type="submit" className="invite-btn" disabled={isSubmitting}>
+               {isSubmitting ? 'Sending...' : 'Request an invitation'} <span className="arrow">→</span>
              </button>
-          </div>
+          </form>
 
           <div className="trusted-by-row">
             <span>Trusted by students at</span>
@@ -272,7 +324,7 @@ function LandingPage() {
 
       <section className="bottom-cta-section">
          <h3>Real students. Real insight. Meaningful matches.</h3>
-         <button className="bottom-join-btn" onClick={() => navigate('/waitlist')}>Join the waitlist →</button>
+         <button className="bottom-join-btn" onClick={() => document.getElementById('waitlist-form')?.scrollIntoView({ behavior: 'smooth' })}>Join the waitlist →</button>
       </section>
 
       <footer className="landing-footer">
@@ -283,6 +335,31 @@ function LandingPage() {
         <p>© 2026 Weave · Built for students, by students.</p>
         <Link to="/signin" className="footer-signin-link">Sign In</Link>
       </footer>
+    </div>
+  )
+}
+
+function ConfirmationPage() {
+  const navigate = useNavigate()
+  
+  return (
+    <div className="landing-weave-root">
+      <nav className="landing-nav">
+        <div className="nav-logo" onClick={() => navigate('/')} style={{cursor:'pointer'}}>
+          <img src="/logo.png" alt="W" />
+          <span>Weave</span>
+        </div>
+      </nav>
+
+      <main className="landing-hero-section" style={{minHeight: '70vh', display:'flex', alignItems:'center'}}>
+        <div className="hero-content" style={{textAlign:'left', maxWidth:'500px'}}>
+          <div className="success-state">
+            <h1 className="hero-title" style={{fontSize: '3.5rem'}}>Thanks. <br/><em>Talk soon.</em></h1>
+            <p className="hero-description">We've received your request. Check your inbox in a few days for a magic link if we have a spot available.</p>
+            <button className="nav-request-btn" onClick={() => navigate('/')}>Return home</button>
+          </div>
+        </div>
+      </main>
     </div>
   )
 }
@@ -368,7 +445,6 @@ function AuthPage({ onLoginSuccess }: AuthPageProps) {
 
 function WaitlistPage() {
   const navigate = useNavigate()
-  const [submitted, setSubmitted] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [studentType, setStudentType] = useState<'high_school_student' | 'university_student'>('high_school_student')
@@ -382,14 +458,14 @@ function WaitlistPage() {
         body: JSON.stringify({ 
           email, 
           studentType, 
-          source: 'waitlist',
+          source: 'waitlist_page',
           initial_query: `Name: ${name}`
         })
       })
-      setSubmitted(true)
+      navigate('/confirmation')
     } catch (err) {
       console.error('Waitlist error:', err)
-      setSubmitted(true)
+      navigate('/confirmation')
     }
   }
   
@@ -404,57 +480,47 @@ function WaitlistPage() {
 
       <main className="landing-hero-section" style={{minHeight: '70vh', display:'flex', alignItems:'center'}}>
         <div className="hero-content" style={{textAlign:'left', maxWidth:'500px'}}>
-          {!submitted ? (
-            <>
-              <h1 className="hero-title" style={{fontSize: '3.5rem'}}>Join the <br/><em>inner circle</em>.</h1>
-              <p className="hero-description">Weave is currently invite-only to maintain the quality of our community. Apply for access and we'll reach out shortly.</p>
-              
-              <form className="hero-cta-box" style={{margin:'0', textAlign:'left'}} onSubmit={handleSubmit}>
-                <div className="type-toggle" style={{gridTemplateColumns: '1fr 1fr', marginBottom: '16px'}}>
-                  <button 
-                    type="button"
-                    className={studentType === 'high_school_student' ? 'active' : ''} 
-                    onClick={() => setStudentType('high_school_student')}
-                  >
-                    HS student
-                  </button>
-                  <button 
-                    type="button"
-                    className={studentType === 'university_student' ? 'active' : ''} 
-                    onClick={() => setStudentType('university_student')}
-                  >
-                    Uni student
-                  </button>
-                </div>
-                <div className="input-row" style={{gridTemplateColumns:'1fr'}}>
-                  <input 
-                    type="text" 
-                    placeholder="Full name" 
-                    required 
-                    style={{marginBottom:'8px'}}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                  <input 
-                    type="email" 
-                    placeholder="University or school email" 
-                    required 
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-                <button type="submit" className="invite-btn" style={{marginTop:'12px'}}>
-                  Request Invitation
-                </button>
-              </form>
-            </>
-          ) : (
-            <div className="success-state">
-              <h1 className="hero-title" style={{fontSize: '3.5rem'}}>Thanks. <br/><em>Talk soon.</em></h1>
-              <p className="hero-description">We've received your request. Check your inbox in a few days for a magic link if we have a spot available.</p>
-              <button className="nav-request-btn" onClick={() => navigate('/')}>Return home</button>
+          <h1 className="hero-title" style={{fontSize: '3.5rem'}}>Join the <br/><em>inner circle</em>.</h1>
+          <p className="hero-description">Weave is currently invite-only to maintain the quality of our community. Apply for access and we'll reach out shortly.</p>
+          
+          <form className="hero-cta-box" style={{margin:'0', textAlign:'left'}} onSubmit={handleSubmit}>
+            <div className="type-toggle" style={{gridTemplateColumns: '1fr 1fr', marginBottom: '16px'}}>
+              <button 
+                type="button"
+                className={studentType === 'high_school_student' ? 'active' : ''} 
+                onClick={() => setStudentType('high_school_student')}
+              >
+                HS student
+              </button>
+              <button 
+                type="button"
+                className={studentType === 'university_student' ? 'active' : ''} 
+                onClick={() => setStudentType('university_student')}
+              >
+                Uni student
+              </button>
             </div>
-          )}
+            <div className="input-row" style={{gridTemplateColumns:'1fr'}}>
+              <input 
+                type="text" 
+                placeholder="Full name" 
+                required 
+                style={{marginBottom:'8px'}}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+              <input 
+                type="email" 
+                placeholder="University or school email" 
+                required 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <button type="submit" className="invite-btn" style={{marginTop:'12px'}}>
+              Request Invitation
+            </button>
+          </form>
         </div>
       </main>
     </div>

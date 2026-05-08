@@ -137,12 +137,17 @@ export async function ensureUserPerson(email) {
 }
 
 export async function saveWaitlistLead({ email, studentType, source, initial_query }) {
-  await supabase.from('waitlist').insert({ 
+  const { data, error } = await supabase.from('waitlist').insert({ 
     email, 
     student_type: studentType, 
     source, 
     initial_query 
   });
+  if (error) {
+    console.error('Error saving waitlist lead:', error);
+    throw error;
+  }
+  return data;
 }
 
 export async function saveChatTranscript(email, messages) {
