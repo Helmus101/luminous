@@ -64,8 +64,13 @@ app.post('/api/users/ensure', async (req, res) => {
 });
 
 app.post('/api/waitlist', async (req, res) => {
-  await saveWaitlistLead(req.body);
-  res.status(201).json({ success: true });
+  try {
+    await saveWaitlistLead(req.body);
+    res.status(201).json({ success: true });
+  } catch (error) {
+    console.error('Waitlist API Error:', error);
+    res.status(500).json({ error: 'Failed to save waitlist lead' });
+  }
 });
 
 app.post('/api/auth/signin', async (req, res) => {
