@@ -7,6 +7,7 @@ import {
   saveChatTranscript, 
   getLatestChatSession, 
   ensureUserPerson,
+  getPersonByEmail,
   saveWaitlistLead,
   findPersonByName,
   signInUser,
@@ -38,7 +39,11 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    await saveChatTranscript(email, [...messages, { id: randomUUID(), role: 'assistant', content: aiResponse.text, payload: aiResponse.payload }]);
+    await saveChatTranscript(
+      email, 
+      [...messages, { id: randomUUID(), role: 'assistant', content: aiResponse.text, payload: aiResponse.payload }],
+      aiResponse.payload?.extracted_context
+    );
     res.json(aiResponse);
   } catch (err) {
     console.error('Chat API Error:', err);
@@ -49,6 +54,19 @@ app.post('/api/chat', async (req, res) => {
 app.get('/api/chat/latest', async (req, res) => {
   const { email } = req.query;
   const session = await getLatestChatSession(email);
+  
+  if (session.messages.length === 0) {
+    const person = await getPersonByEmail(email);
+    if (person && person.name) {
+      session.messages = [{
+        id: 'welcome',
+        role: 'assistant',
+        content: `Welcome back, ${person.name}. I've missed our conversations. What's on your mind regarding your campus journey?`,
+        payload: { kind: 'text', goal: 'general_discovery' }
+      }];
+    }
+  }
+  
   res.json(session || { messages: [] });
 });
 
