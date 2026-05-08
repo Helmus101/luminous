@@ -62,7 +62,7 @@ function inferUserContext(messages = []) {
           else if (val.toLowerCase().includes('university') || val.toLowerCase().includes('college')) studentType = 'university_student';
         }
         if (goal === 'uni_context') university = val;
-        if (goal === 'uni_linkedin' && val.includes('linkedin.com')) linkedInUrl = val;
+        if ((goal === 'uni_linkedin' || goal === 'hs_linkedin') && val.includes('linkedin.com')) linkedInUrl = val;
       }
     }
   }
@@ -152,12 +152,14 @@ export async function saveWaitlistLead({ email, studentType, source, initial_que
 
 export async function saveChatTranscript(email, messages) {
   if (!email) return;
+  const userId = await getUserIdByEmail(email);
   await syncUserContextToPeople(email, messages);
   
   await supabase
     .from('chat_sessions')
     .upsert({
       email,
+      user_id: userId,
       messages,
       updated_at: new Date().toISOString()
     }, { onConflict: 'email' });
