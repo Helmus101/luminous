@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 import express from 'express';
 import cors from 'cors';
+import { randomUUID } from 'crypto';
 import { 
   saveChatTranscript, 
   getLatestChatSession, 
@@ -37,7 +38,7 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    await saveChatTranscript(email, [...messages, { role: 'assistant', content: aiResponse.text, payload: aiResponse.payload }]);
+    await saveChatTranscript(email, [...messages, { id: randomUUID(), role: 'assistant', content: aiResponse.text, payload: aiResponse.payload }]);
     res.json(aiResponse);
   } catch (err) {
     console.error('Chat API Error:', err);

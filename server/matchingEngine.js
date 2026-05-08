@@ -38,8 +38,8 @@ export async function generateChatResponse(messages, email) {
   if (currentGoal === 'student_type') {
     if (lowerUserMsg.includes('high school') || lowerUserMsg.includes('prospective')) {
       return {
-        text: "Discovery at Weave is about 'human truth.' What kind of university vibe are you looking for? (e.g., Are you looking for a high-pressure academic environment, or something more socially balanced?)",
-        payload: { kind: 'text', goal: 'hs_vibe' }
+        text: "I'd love to help you find the right people. To get started, could you share your LinkedIn URL?",
+        payload: { kind: 'text', goal: 'hs_linkedin' }
       };
     } else {
       return {
@@ -50,24 +50,47 @@ export async function generateChatResponse(messages, email) {
   }
 
   // HS Path
-  if (currentGoal === 'hs_vibe') {
+  if (currentGoal === 'hs_linkedin') {
     return {
-      text: "Got it. And which universities are you most interested in right now?",
-      payload: { kind: 'text', goal: 'hs_uni_interests' }
+      text: "Thanks! Now, please paste this prompt into an LLM (like ChatGPT or Claude) and then paste the result here: 'Based on my LinkedIn profile, what are my core interests and what kind of mentor would best help me navigate university choices?'",
+      payload: { kind: 'text', goal: 'hs_llm_prompt' }
     };
   }
 
-  if (currentGoal === 'hs_uni_interests') {
-    const university = lastUserMsg;
-    const matches = mentors.filter(m => 
-      m.background.toLowerCase().includes(university.toLowerCase()) || 
-      m.location.toLowerCase().includes(university.toLowerCase())
-    ).slice(0, 3);
+  if (currentGoal === 'hs_llm_prompt') {
+    return {
+      text: "Got it. Now, tell me who you are looking for? Not just which university, but what kind of person? What are their interests, their background, or their vibe? Please be as specific as possible!",
+      payload: { kind: 'text', goal: 'hs_search_who' }
+    };
+  }
+
+  if (currentGoal === 'hs_search_who') {
+    return {
+      text: "That's helpful. To be even more specific: what specific industries or fields of study are you most interested in exploring with a mentor?",
+      payload: { kind: 'text', goal: 'hs_interests' }
+    };
+  }
+
+  if (currentGoal === 'hs_interests') {
+    return {
+      text: "Got it. And what's one thing about your future university experience that you're most curious or nervous about?",
+      payload: { kind: 'text', goal: 'hs_vibe' }
+    };
+  }
+
+  if (currentGoal === 'hs_vibe') {
+    const context = messages.map(m => m.content).join(' ').toLowerCase();
+    const matches = mentors.filter(m => {
+      const expertiseMatch = m.expertise?.some(e => context.includes(e.toLowerCase()));
+      const backgroundMatch = m.background?.toLowerCase().split(' ').some(word => word.length > 3 && context.includes(word));
+      const goalMatch = m.goals?.some(g => context.includes(g.toLowerCase()));
+      return expertiseMatch || backgroundMatch || goalMatch;
+    }).slice(0, 3);
     
     const displayMatches = matches.length > 0 ? matches : mentors.slice(0, 3);
     const responseText = matches.length > 0 
-      ? `Based on your interest in ${university}, these students might have the perspective you need:`
-      : `I couldn't find anyone specifically at ${university} yet, but these mentors have great perspectives:`;
+      ? `Based on everything you've shared, these mentors might have the perspective you need:`
+      : `I've noted your preferences. While I don't have a perfect match yet, these mentors have great perspectives that might help:`;
 
     return {
       text: responseText,
